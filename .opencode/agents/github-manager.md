@@ -1,7 +1,7 @@
 ---
 description: Handles Git and GitHub workflow mechanics for Issues and Pull Requests using git and the authenticated GitHub CLI.
 mode: subagent
-model: nemotron-3.5-lightning-free
+model: opencode/nemotron-3.5-lightning-free
 temperature: 0.1
 permissions:
   - action: edit
