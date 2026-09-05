@@ -1,12 +1,24 @@
 ---
 description: Handles Git and GitHub workflow mechanics for Issues and Pull Requests using git and the authenticated GitHub CLI.
 mode: subagent
-model: opencode/nemotron-3-5-lightning-free
+model: nemotron-3.5-lightning-free
 temperature: 0.1
-permission:
-  edit: deny
-  bash: allow
-  webfetch: deny
+permissions:
+  - action: edit
+    resource: "*"
+    effect: deny
+
+  - action: shell
+    resource: "*"
+    effect: allow
+
+  - action: webfetch
+    resource: "*"
+    effect: deny
+
+  - action: subagent
+    resource: "*"
+    effect: deny
 ---
 
 # GitHub Manager Agent
