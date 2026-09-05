@@ -63,6 +63,35 @@ uv run ruff format .
 uv run mypy src
 ```
 
+## Configuration
+
+The standard-library configuration layer is available through
+`adams_tutoria.config`:
+
+```python
+from adams_tutoria.config import default_config, load_config
+
+config = default_config()
+# Or load documented ADAMS_TUTORIA_* overrides at call time:
+config = load_config()
+```
+
+Defaults use `data/private/` and `data/local/` below the configured base
+directory. Paths are only represented; configuration does not create
+directories, access files, or initialize SQLite. `load_config` accepts an
+optional `environ` mapping for deterministic callers (`environ={}` disables
+all environment overrides). Relative values are joined to the base directory.
+
+Supported overrides are:
+
+- `ADAMS_TUTORIA_BASE_DIR`
+- `ADAMS_TUTORIA_DATA_ROOT`
+- `ADAMS_TUTORIA_PRIVATE_DATA_DIR`
+- `ADAMS_TUTORIA_LOCAL_DATA_DIR`
+
+Setting `ADAMS_TUTORIA_DATA_ROOT` changes the default root for the private and
+local directories; an explicit child-directory override takes precedence.
+
 ## Local data and secrets
 
 Operational data must stay local and must never be committed to GitHub. Use
@@ -75,9 +104,8 @@ Do not store credentials, session cookies, API keys, real student information,
 or unredacted reports and exports in tracked files. Tests and examples must use
 synthetic data only; versioned test fixtures belong under `tests/fixtures/`.
 
-The project currently has no environment variables or configurable secrets, so
-an `.env.example` file is intentionally not provided. If configuration is
-introduced later, document its variables without adding real secret values.
+No `.env` loader is used. Do not add real secret values to environment examples
+or tracked files. There are no environment variables read at import time.
 
 ## Status
 
