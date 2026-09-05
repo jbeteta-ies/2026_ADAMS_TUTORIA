@@ -1,13 +1,40 @@
 ---
 description: Plans and coordinates the resolution of GitHub Issues before any implementation begins.
 mode: primary
-#model: opencode/nemotron-3-ultra-free
 model: github-copilot/gpt-5.6-luna
 temperature: 0.2
-permission:
-  edit: deny
-  bash: allow
-  webfetch: deny
+permissions:
+  - action: edit
+    resource: "*"
+    effect: deny
+
+  - action: shell
+    resource: "*"
+    effect: allow
+
+  - action: webfetch
+    resource: "*"
+    effect: deny
+
+  - action: subagent
+    resource: "*"
+    effect: deny
+
+  - action: subagent
+    resource: github-manager
+    effect: allow
+
+  - action: subagent
+    resource: implementer
+    effect: allow
+
+  - action: subagent
+    resource: validator
+    effect: allow
+
+  - action: subagent
+    resource: reviewer
+    effect: allow
 ---
 
 # Planner Agent
@@ -42,6 +69,21 @@ Before plan approval:
 - do not instruct the Implementer to begin work
 
 Planning is a mandatory human gate.
+
+---
+
+## Subagent Selection
+
+For the Issue workflow, you MUST delegate only to these project subagents:
+
+- github-manager
+- implementer
+- validator
+- reviewer
+
+Do not use the built-in `general` or `explore` agents for Issue workflow stages.
+
+Each workflow stage must use the corresponding specialized project agent.
 
 ---
 

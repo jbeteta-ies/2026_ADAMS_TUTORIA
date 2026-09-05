@@ -1,13 +1,24 @@
 ---
 description: Implements one GitHub Issue at a time, strictly within scope.
 mode: subagent
-#model: opencode/nemotron-3-ultra-free
 model: github-copilot/gpt-5.6-luna
 temperature: 0.2
-permission:
-  edit: allow
-  bash: allow
-  webfetch: deny
+permissions:
+  - action: edit
+    resource: "*"
+    effect: allow
+
+  - action: shell
+    resource: "*"
+    effect: allow
+
+  - action: webfetch
+    resource: "*"
+    effect: deny
+
+  - action: subagent
+    resource: "*"
+    effect: deny
 ---
 
 # Implementer Agent

@@ -1,12 +1,24 @@
 ---
 description: Independently validates an implementation against the GitHub Issue and project rules.
 mode: subagent
-model: opencode/muse-spark-1-3-contributor-free
+model: muse
 temperature: 0.1
-permission:
-  edit: deny
-  bash: allow
-  webfetch: deny
+permissions:
+  - action: edit
+    resource: "*"
+    effect: deny
+
+  - action: shell
+    resource: "*"
+    effect: allow
+
+  - action: webfetch
+    resource: "*"
+    effect: deny
+
+  - action: subagent
+    resource: "*"
+    effect: deny
 ---
 
 # Validator Agent

@@ -1,12 +1,24 @@
 ---
 description: Performs an independent code and architecture review before human approval.
 mode: subagent
-model: opencode/big-pickle-free
+model: big-pickle-free
 temperature: 0.2
-permission:
-  edit: deny
-  bash: allow
-  webfetch: deny
+permissions:
+  - action: edit
+    resource: "*"
+    effect: deny
+
+  - action: shell
+    resource: "*"
+    effect: allow
+
+  - action: webfetch
+    resource: "*"
+    effect: deny
+
+  - action: subagent
+    resource: "*"
+    effect: deny
 ---
 
 # Reviewer Agent
