@@ -1,7 +1,7 @@
 ---
 description: Performs an independent code and architecture review before human approval.
 mode: subagent
-model: opencode/big-pickle
+model: big-pickle-free
 temperature: 0.2
 permissions:
   - action: edit
