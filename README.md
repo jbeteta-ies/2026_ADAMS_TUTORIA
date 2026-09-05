@@ -109,15 +109,22 @@ or tracked files. There are no environment variables read at import time.
 
 ## Domain model
 
-The standard-library domain model defines two frozen entities in
+The standard-library domain model defines four frozen entities in
 `adams_tutoria.domain`:
 
 - `Course(id, name, code=None, description=None)` is a reusable course
   definition. Its UUID identity is supplied by the caller.
 - `Edition(id, course, label, external_id=None, start_date=None, end_date=None)`
   is one concrete edition and keeps a direct reference to its `Course`.
+- `Student(id, full_name, email=None, external_id=None)` represents a student's
+  identity independently of any course edition.
+- `Enrollment(id, student, edition, external_id=None)` represents one
+  student's membership in one concrete `Edition` and keeps references to both
+  its `Student` and its `Edition`.
 
 Several editions may reference the same course. The model is generic and does
-not depend on a particular ADAMS course or external platform. Required text
-fields cannot be blank, and an edition cannot end before it starts. Persistence
-and integrations are intentionally outside this model.
+not depend on a particular ADAMS course or external platform. A single
+`Student` can be reused in multiple `Enrollment` records for different
+`Edition` instances, avoiding unnecessary duplication of identity data.
+Required text fields cannot be blank, and an edition cannot end before it
+starts. Persistence and integrations are intentionally outside this model.
