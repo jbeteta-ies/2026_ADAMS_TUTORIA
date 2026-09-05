@@ -63,6 +63,22 @@ uv run ruff format .
 uv run mypy src
 ```
 
+## Local data and secrets
+
+Operational data must stay local and must never be committed to GitHub. Use
+`data/private/` or `data/local/` for local application data, including ADAMS
+exports, imported reports, generated communications, and databases. The whole
+`data/` directory is ignored by Git, as are SQLite/database files and local
+`.env` configuration files.
+
+Do not store credentials, session cookies, API keys, real student information,
+or unredacted reports and exports in tracked files. Tests and examples must use
+synthetic data only; versioned test fixtures belong under `tests/fixtures/`.
+
+The project currently has no environment variables or configurable secrets, so
+an `.env.example` file is intentionally not provided. If configuration is
+introduced later, document its variables without adding real secret values.
+
 ## Status
 
 No business logic implemented yet. This is the initial project structure only.
