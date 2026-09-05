@@ -107,6 +107,17 @@ synthetic data only; versioned test fixtures belong under `tests/fixtures/`.
 No `.env` loader is used. Do not add real secret values to environment examples
 or tracked files. There are no environment variables read at import time.
 
-## Status
+## Domain model
 
-No business logic implemented yet. This is the initial project structure only.
+The standard-library domain model defines two frozen entities in
+`adams_tutoria.domain`:
+
+- `Course(id, name, code=None, description=None)` is a reusable course
+  definition. Its UUID identity is supplied by the caller.
+- `Edition(id, course, label, external_id=None, start_date=None, end_date=None)`
+  is one concrete edition and keeps a direct reference to its `Course`.
+
+Several editions may reference the same course. The model is generic and does
+not depend on a particular ADAMS course or external platform. Required text
+fields cannot be blank, and an edition cannot end before it starts. Persistence
+and integrations are intentionally outside this model.
