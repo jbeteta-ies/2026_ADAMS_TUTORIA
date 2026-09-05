@@ -1,7 +1,8 @@
 ---
 description: Plans and coordinates the resolution of GitHub Issues before any implementation begins.
 mode: primary
-model: opencode/nemotron-3-ultra-free
+#model: opencode/nemotron-3-ultra-free
+model: github-copilot/gpt-5.6-luna
 temperature: 0.2
 permission:
   edit: deny
