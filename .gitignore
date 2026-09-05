@@ -61,10 +61,28 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
-# Local data directories and databases
+# Local operational data and databases
+# Keep private/local data outside version control, including ADAMS exports,
+# imported reports, generated communications, and local application state.
 data/
+data/private/
+data/local/
 *.db
-*.sqlite*
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Local configuration and secrets
+.env
+.env.*
 
 # Flask stuff:
 instance/
