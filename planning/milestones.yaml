@@ -1,0 +1,31 @@
+- key: M1
+  title: M1 — Bootstrap del proyecto
+  description: Establecer la base técnica, estructura, herramientas y protecciones
+    del proyecto.
+- key: M2
+  title: M2 — Modelo de datos
+  description: Definir el modelo interno reutilizable para cursos, ediciones, alumnado,
+    progreso, evaluaciones y comunicaciones.
+- key: M3
+  title: M3 — Importación de datos ADAMS
+  description: Construir una capa desacoplada para importar reportes de ADAMS cuando
+    se disponga de ejemplos reales.
+- key: M4
+  title: M4 — Seguimiento del alumnado
+  description: Detectar estados, necesidades de seguimiento y reglas configurables
+    de tutorización.
+- key: M5
+  title: M5 — Comunicaciones
+  description: Generar, revisar y registrar comunicaciones personalizadas y generales
+    para copiar/pegar en ADAMS.
+- key: M6
+  title: M6 — Dashboard local
+  description: Crear una interfaz local sencilla para consultar ediciones, alumnado,
+    alertas y comunicaciones.
+- key: M7
+  title: M7 — Integración con contenidos de cursos
+  description: Integrar repositorios Markdown de cursos para apoyar la resolución
+    de dudas del alumnado.
+- key: M8
+  title: M8 — Calidad, seguridad y cierre del MVP
+  description: Endurecer, documentar y validar el MVP de extremo a extremo.

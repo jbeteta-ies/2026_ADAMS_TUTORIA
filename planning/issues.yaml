@@ -1,0 +1,132 @@
+- sequence: 1
+  milestone: M1
+  title: Inicializar estructura Python del proyecto
+  body_file: planning/issues/01-inicializar-estructura-python-del-proyecto.md
+- sequence: 2
+  milestone: M1
+  title: Configurar calidad de código y tests
+  body_file: planning/issues/02-configurar-calidad-de-codigo-y-tests.md
+- sequence: 3
+  milestone: M1
+  title: Proteger datos locales y secretos
+  body_file: planning/issues/03-proteger-datos-locales-y-secretos.md
+- sequence: 4
+  milestone: M1
+  title: Crear configuración base de la aplicación
+  body_file: planning/issues/04-crear-configuracion-base-de-la-aplicacion.md
+- sequence: 5
+  milestone: M2
+  title: Diseñar entidades Course y Edition
+  body_file: planning/issues/05-disenar-entidades-course-y-edition.md
+- sequence: 6
+  milestone: M2
+  title: Diseñar entidades Student y Enrollment
+  body_file: planning/issues/06-disenar-entidades-student-y-enrollment.md
+- sequence: 7
+  milestone: M2
+  title: Diseñar progreso y evaluaciones
+  body_file: planning/issues/07-disenar-progreso-y-evaluaciones.md
+- sequence: 8
+  milestone: M2
+  title: Diseñar historial de comunicaciones
+  body_file: planning/issues/08-disenar-historial-de-comunicaciones.md
+- sequence: 9
+  milestone: M2
+  title: Implementar persistencia SQLite
+  body_file: planning/issues/09-implementar-persistencia-sqlite.md
+- sequence: 10
+  milestone: M3
+  title: Definir contrato interno de importación
+  body_file: planning/issues/10-definir-contrato-interno-de-importacion.md
+- sequence: 11
+  milestone: M3
+  title: Crear importador genérico CSV/XLSX
+  body_file: planning/issues/11-crear-importador-generico-csv-xlsx.md
+- sequence: 12
+  milestone: M3
+  title: Preparar adaptador de alumnos y matrículas ADAMS
+  body_file: planning/issues/12-preparar-adaptador-de-alumnos-y-matriculas-adams.md
+- sequence: 13
+  milestone: M3
+  title: Preparar adaptador de seguimiento ADAMS
+  body_file: planning/issues/13-preparar-adaptador-de-seguimiento-adams.md
+- sequence: 14
+  milestone: M3
+  title: Preparar adaptador de evaluaciones ADAMS
+  body_file: planning/issues/14-preparar-adaptador-de-evaluaciones-adams.md
+- sequence: 15
+  milestone: M4
+  title: Definir reglas configurables de seguimiento
+  body_file: planning/issues/15-definir-reglas-configurables-de-seguimiento.md
+- sequence: 16
+  milestone: M4
+  title: Calcular estado resumido de cada alumno
+  body_file: planning/issues/16-calcular-estado-resumido-de-cada-alumno.md
+- sequence: 17
+  milestone: M4
+  title: Priorizar alumnado que requiere atención
+  body_file: planning/issues/17-priorizar-alumnado-que-requiere-atencion.md
+- sequence: 18
+  milestone: M5
+  title: Definir catálogo de tipos de comunicación
+  body_file: planning/issues/18-definir-catalogo-de-tipos-de-comunicacion.md
+- sequence: 19
+  milestone: M5
+  title: Implementar plantillas de mensajes
+  body_file: planning/issues/19-implementar-plantillas-de-mensajes.md
+- sequence: 20
+  milestone: M5
+  title: Generar recomendaciones de comunicación
+  body_file: planning/issues/20-generar-recomendaciones-de-comunicacion.md
+- sequence: 21
+  milestone: M5
+  title: Registrar comunicaciones y acciones del tutor
+  body_file: planning/issues/21-registrar-comunicaciones-y-acciones-del-tutor.md
+- sequence: 22
+  milestone: M6
+  title: Crear shell del dashboard Streamlit
+  body_file: planning/issues/22-crear-shell-del-dashboard-streamlit.md
+- sequence: 23
+  milestone: M6
+  title: Crear vista resumen de edición
+  body_file: planning/issues/23-crear-vista-resumen-de-edicion.md
+- sequence: 24
+  milestone: M6
+  title: Crear tabla de seguimiento y filtros
+  body_file: planning/issues/24-crear-tabla-de-seguimiento-y-filtros.md
+- sequence: 25
+  milestone: M6
+  title: Crear ficha de alumno
+  body_file: planning/issues/25-crear-ficha-de-alumno.md
+- sequence: 26
+  milestone: M6
+  title: Añadir flujo de copiar mensajes
+  body_file: planning/issues/26-anadir-flujo-de-copiar-mensajes.md
+- sequence: 27
+  milestone: M7
+  title: Definir integración de repositorios de contenidos
+  body_file: planning/issues/27-definir-integracion-de-repositorios-de-contenidos.md
+- sequence: 28
+  milestone: M7
+  title: Indexar y buscar contenidos Markdown
+  body_file: planning/issues/28-indexar-y-buscar-contenidos-markdown.md
+- sequence: 29
+  milestone: M7
+  title: Crear asistente de apoyo para responder dudas
+  body_file: planning/issues/29-crear-asistente-de-apoyo-para-responder-dudas.md
+- sequence: 30
+  milestone: M8
+  title: Añadir validaciones integradas del flujo principal
+  body_file: planning/issues/30-anadir-validaciones-integradas-del-flujo-principal.md
+- sequence: 31
+  milestone: M8
+  title: Revisar privacidad, seguridad y retención de datos
+  body_file: planning/issues/31-revisar-privacidad,-seguridad-y-retencion-de-datos.md
+- sequence: 32
+  milestone: M8
+  title: Documentar instalación y operación del MVP
+  body_file: planning/issues/32-documentar-instalacion-y-operacion-del-mvp.md
+- sequence: 33
+  milestone: M8
+  title: Validación final del MVP
+  body_file: planning/issues/33-validacion-final-del-mvp.md
