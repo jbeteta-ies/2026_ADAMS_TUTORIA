@@ -46,3 +46,34 @@ class Edition:
             and self.end_date < self.start_date
         ):
             raise ValueError("end_date must not be before start_date")
+
+
+@dataclass(frozen=True)
+class Student:
+    """A student's identity, independent of any course edition."""
+
+    id: UUID
+    full_name: str
+    email: str | None = None
+    external_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_blank(self.full_name, "full_name")
+        if self.email is not None:
+            _require_non_blank(self.email, "email")
+        if self.external_id is not None:
+            _require_non_blank(self.external_id, "external_id")
+
+
+@dataclass(frozen=True)
+class Enrollment:
+    """A student's membership in one concrete course edition."""
+
+    id: UUID
+    student: Student
+    edition: Edition
+    external_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.external_id is not None:
+            _require_non_blank(self.external_id, "external_id")
