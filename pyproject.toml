@@ -1,0 +1,17 @@
+[project]
+name = "adams-tutoria"
+version = "0.1.0"
+description = "Local application to support tutoring and monitoring of ADAMS online courses"
+readme = "README.md"
+requires-python = ">=3.13"
+authors = [
+    {name = "Javier", email = "javier@example.com"}
+]
+license = {text = "MIT"}
+
+[build-system]
+requires = ["uv_build>=0.12.9,<0.13"]
+build-backend = "uv_build"
+
+[project.scripts]
+adams-tutoria = "adams_tutoria.__main__:main"
