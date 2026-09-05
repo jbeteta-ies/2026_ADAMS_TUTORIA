@@ -5,6 +5,7 @@
 This repository contains a local application to support tutoring and monitoring of ADAMS online courses.
 
 The application will help manage:
+
 - Courses
 - Editions
 - Students
@@ -23,19 +24,104 @@ Student credentials or ADAMS credentials must never be stored in this repository
 
 ## Development Principles
 
-All work must be performed through GitHub Issues and Pull Requests.
+All non-trivial work must be performed through GitHub Issues and Pull Requests.
 
 Agents must not implement untracked work unless explicitly instructed.
 
-Every non-trivial change must:
-1. Be linked to a GitHub Issue.
-2. Use a dedicated branch.
-3. Include validation.
-4. Produce a validation report.
-5. Open or update a Pull Request.
-6. Stop for human review before merge.
+Every non-trivial Issue must:
 
-Human approval is mandatory before merging Pull Requests.
+1. Be analyzed by the Planner.
+2. Have an approved implementation plan.
+3. Use a dedicated branch.
+4. Include validation.
+5. Produce a validation report.
+6. Receive independent review.
+7. Open or update a Pull Request.
+8. Stop for human review before merge.
+
+Human approval is mandatory at two points:
+
+1. before implementation begins
+2. before a Pull Request is merged
+
+---
+
+# Mandatory Planning Gate
+
+The Planner is the normal entry point for GitHub Issue work.
+
+No non-trivial Issue may begin implementation before a plan has been approved.
+
+Before any Issue branch is created or any application code is modified:
+
+1. The Planner reads:
+   - this `AGENTS.md`
+   - the complete GitHub Issue
+   - relevant Skills
+   - relevant repository context
+2. The Planner produces a complete implementation plan.
+3. The plan must include:
+   - objective
+   - scope
+   - out-of-scope work
+   - technical decisions
+   - expected files
+   - implementation steps
+   - validation strategy
+   - risks and assumptions
+   - dependencies
+   - agent delegation
+4. The plan must end with:
+
+   `WAITING FOR PLAN APPROVAL`
+
+5. The Planner must stop.
+6. No branch creation, implementation, commit, push, or Pull Request work may begin until explicit human approval is given.
+
+If humans request changes to the plan:
+
+1. The Planner revises the complete plan.
+2. The revised plan again ends with:
+
+   `WAITING FOR PLAN APPROVAL`
+
+3. The Planner stops again.
+
+If implementation later requires a material deviation from the approved plan, work must stop and the Planner must request approval for a revised plan.
+
+Examples of material changes:
+
+- new framework
+- new persistent dependency
+- architectural change
+- significant scope expansion
+- new data-storage mechanism
+- major new files not contemplated by the plan
+- acceptance criteria cannot be met using the approved approach
+
+Minor implementation details that do not alter architecture or scope do not require replanning.
+
+---
+
+# Normal Issue Workflow
+
+The standard workflow is:
+
+Issue
+→ Planner analysis
+→ Implementation Plan
+→ Human plan approval
+→ GitHub Manager
+→ Implementer
+→ Validator
+→ Reviewer
+→ GitHub Manager
+→ Pull Request
+→ Human PR approval
+→ Merge
+→ Cleanup
+
+The Planner remains responsible for coordination throughout the workflow.
 
 ---
 
@@ -43,18 +129,27 @@ Human approval is mandatory before merging Pull Requests.
 
 ### Before starting an Issue
 
-The agent must:
+After plan approval, the GitHub Manager must:
 
-1. Check the current Git status.
-2. Ensure the working tree is clean.
-3. Ensure the local `main` branch is synchronized with `origin/main`.
-4. Read the complete GitHub Issue.
-5. Identify:
+1. Read this `AGENTS.md`.
+2. Check:
+   - `git status`
+   - current branch
+   - configured remotes
+   - `gh auth status`
+   - repository accessibility
+3. Ensure the working tree is clean.
+4. Checkout `main`.
+5. Synchronize local `main` with `origin/main`.
+6. Read the complete assigned GitHub Issue.
+7. Confirm:
    - scope
    - acceptance criteria
    - dependencies
-   - risks
-6. Do not start implementation if required dependencies are unresolved.
+   - milestone
+8. Create the Issue branch.
+
+Implementation must not start if required dependencies are unresolved.
 
 ### Branch naming
 
@@ -70,25 +165,35 @@ Example:
 
 Do not reuse branches between unrelated Issues.
 
+Do not create one branch per Milestone.
+
 ---
 
 ## Implementation Rules
 
-The implementation agent must:
+The Implementer must:
 
-1. Work only within the scope of the assigned Issue.
-2. Avoid unrelated refactors.
-3. Prefer small, understandable changes.
-4. Add or update tests when appropriate.
-5. Update relevant documentation.
-6. Preserve backward compatibility unless the Issue explicitly requires otherwise.
-7. Never commit:
-   - credentials
-   - API keys
-   - ADAMS session data
-   - real student reports
-   - personal student data
-   - local SQLite databases containing real student data
+1. Read:
+   - `AGENTS.md`
+   - the approved Planner plan
+   - the assigned Issue
+2. Work only within the approved Issue scope.
+3. Follow the technical decisions established by the approved plan.
+4. Avoid unrelated refactors.
+5. Prefer small, understandable changes.
+6. Add or update tests when appropriate.
+7. Update relevant documentation.
+8. Preserve backward compatibility unless explicitly required otherwise.
+9. Escalate material deviations back to the Planner.
+
+The Implementer must never commit:
+
+- credentials
+- API keys
+- ADAMS session data
+- real student reports
+- personal student data
+- operational databases containing real student data
 
 If examples or fixtures require student data, use synthetic or anonymized data.
 
@@ -96,9 +201,19 @@ If examples or fixtures require student data, use synthetic or anonymized data.
 
 ## Validation Requirements
 
-Every Issue must be validated before a Pull Request is marked ready for review.
+Every Issue must be independently validated before a Pull Request is presented for human review.
 
-Validation must include all applicable checks defined by the project, including eventually:
+The Validator must:
+
+1. Read:
+   - `AGENTS.md`
+   - the Issue
+   - the approved plan
+   - the implementation diff
+2. Verify every acceptance criterion independently.
+3. Run all applicable project checks.
+
+Validation may include:
 
 - Unit tests
 - Integration tests
@@ -106,38 +221,54 @@ Validation must include all applicable checks defined by the project, including 
 - Formatting checks
 - Static typing
 - Application startup checks
+- Database checks
 - Issue-specific acceptance tests
+- Regression checks
+- Privacy/data-protection checks
 
-If a required validation fails, the Pull Request must not be marked ready for human review.
+The Validator must not silently repair defects unless explicitly instructed to change roles.
 
-The agent must fix the problem and rerun validation.
+If a required validation fails:
+
+- final validation status must be `NOT READY`
+- the Planner coordinates a return to the Implementer
+- corrections remain on the same Issue branch
+- validation must be repeated
 
 ---
 
-## Validation Report
+# Validation Report
 
-Before requesting human review, produce a validation report.
+Before a Pull Request can be presented for human review, a complete validation report is mandatory.
 
 The report must contain:
 
-### Issue
+## Issue
+
 Issue number and title.
 
-### Implementation Summary
-Brief description of what was implemented.
+## Implementation Summary
 
-### Files Changed
-List of relevant files created, modified, or deleted.
+Brief factual description of what was implemented.
 
-### Acceptance Criteria
-Each acceptance criterion must be explicitly marked:
+## Files Changed
+
+Relevant files created, modified, or deleted.
+
+## Acceptance Criteria
+
+Every acceptance criterion must be marked as:
 
 - PASS
 - FAIL
 - NOT TESTED
 
-### Validation Executed
+No acceptance criterion may be omitted.
+
+## Validation Executed
+
 For every check include:
+
 - command or procedure
 - result
 - relevant notes
@@ -149,17 +280,23 @@ Example:
 - `mypy src`: PASS
 - application startup: PASS
 
-### Risks and Limitations
-Known limitations, technical debt, edge cases, or assumptions.
+## Risks and Limitations
 
-### Out-of-Scope Changes
-List any changes made outside the Issue scope.
+Known:
+
+- limitations
+- assumptions
+- edge cases
+- technical debt
+- compatibility concerns
+
+## Out-of-Scope Changes
 
 Expected value normally:
 
 `None`
 
-### Final Status
+## Final Status
 
 Only one of:
 
@@ -168,70 +305,156 @@ Only one of:
 
 A Pull Request must never be presented as complete without this report.
 
+Validation status never authorizes merge.
+
+---
+
+## Reviewer Requirements
+
+After successful validation, the Reviewer must independently assess:
+
+- correctness
+- architecture
+- maintainability
+- simplicity
+- Issue scope compliance
+- approved-plan compliance
+- test quality
+- regressions
+- unnecessary abstractions
+- error handling
+- security
+- privacy/data protection
+- documentation quality
+
+The Reviewer must challenge assumptions made by the Implementer.
+
+Reviewer outcome must be one of:
+
+- `APPROVE FOR HUMAN REVIEW`
+- `REQUEST CHANGES`
+
+Blocking Reviewer findings must be resolved before the Pull Request is presented for human review.
+
+If changes are required:
+
+1. The Planner coordinates corrections.
+2. The Implementer modifies the same Issue branch.
+3. Relevant validations run again.
+4. A new validation report is produced.
+5. Reviewer rechecks the solution where appropriate.
+
 ---
 
 ## Pull Request Workflow
 
-When implementation and validation are complete:
+Only after:
+
+- implementation is complete
+- validation status is `READY FOR HUMAN REVIEW`
+- Reviewer returns `APPROVE FOR HUMAN REVIEW`
+
+may the GitHub Manager prepare the Pull Request.
+
+The GitHub Manager must:
 
 1. Check Git status.
-2. Commit changes using a clear commit message.
-3. Push the Issue branch.
-4. Open a Pull Request against `main`.
-5. Link the corresponding Issue.
-6. Include the validation report in the Pull Request.
-7. Mark the Pull Request as ready for review only if all mandatory checks pass.
-8. Stop.
+2. Inspect changes.
+3. Confirm no sensitive data is staged.
+4. Commit with a clear commit message.
+5. Push the Issue branch.
+6. Open or update a Pull Request against `main`.
+7. Link the corresponding Issue.
+8. Include:
+   - implementation summary
+   - validation report
+   - any relevant reviewer notes
+9. Verify Pull Request state using `gh`.
+10. Stop.
 
-Do not merge the Pull Request automatically.
+Do not merge automatically.
 
-Do not close the Issue automatically before human approval.
+Do not close the Issue before the authorized workflow permits it.
 
 ---
 
-## Human Review Gate
+# Human Pull Request Gate
 
 Human review is mandatory.
 
-The project owner and supervising ChatGPT instance will review:
+The project owner and supervising ChatGPT instance review:
+
 - implementation
+- approved-plan compliance
 - acceptance criteria
 - validation report
+- Reviewer findings
 - architecture
 - maintainability
-- possible regressions
+- regressions
+- privacy implications
 
 Possible outcomes:
 
-### Approved
-The agent may be instructed to:
+## Approved
+
+The GitHub Manager may be instructed to:
+
 - merge the Pull Request
 - confirm Issue closure
-- delete the remote Issue branch
-- delete the local Issue branch
-- return to updated `main`
+- delete branches
+- synchronize `main`
 
-### Changes requested
-The agent must:
-1. Apply requested changes on the same Issue branch.
-2. Re-run all relevant validations.
-3. Produce an updated validation report.
-4. Update the existing Pull Request.
-5. Stop again for human review.
+## Changes requested
+
+The Planner coordinates:
+
+1. corrections on the same Issue branch
+2. revalidation
+3. updated validation report
+4. updated review where appropriate
+5. Pull Request update
+6. another human review stop
+
+---
+
+## Merge Rules
+
+Merge is forbidden without explicit human approval.
+
+Before merge, the GitHub Manager must:
+
+1. Confirm explicit approval.
+2. Verify PR state with `gh`.
+3. Confirm mandatory checks remain successful.
+4. Confirm no new blocking changes have appeared.
+5. Respect repository protection rules.
+
+Do not force merge around failing checks.
+
+Do not bypass protections.
 
 ---
 
 ## Post-Merge Cleanup
 
-After explicit human approval and successful merge:
+After explicit approval and successful merge:
 
 1. Confirm the Pull Request is merged.
-2. Confirm the Issue is closed.
+2. Confirm the Issue is closed when expected.
 3. Delete the remote Issue branch.
-4. Delete the local Issue branch.
-5. Checkout `main`.
-6. Pull the latest `origin/main`.
-7. Confirm the working tree is clean.
+4. Checkout `main`.
+5. Pull latest `origin/main`.
+6. Delete the local Issue branch.
+7. Run:
+   - `git status`
+   - `git branch --show-current`
+8. Confirm:
+   - current branch is `main`
+   - local `main` is synchronized
+   - working tree is clean
+
+Do not delete branches containing unmerged work.
 
 ---
 
@@ -239,91 +462,170 @@ After explicit human approval and successful merge:
 
 GitHub Milestones group related Issues.
 
-Do not create one branch per Milestone.
+Do not create one development branch per Milestone.
 
-Each Issue must keep its own branch and Pull Request.
+Each Issue retains:
+
+- its own plan
+- its own branch
+- its own implementation
+- its own validation
+- its own review
+- its own Pull Request
+- its own human gates
 
 A Milestone may only be considered complete when:
+
 1. All required Issues are closed.
-2. All corresponding Pull Requests are merged.
+2. All required Pull Requests are merged.
 3. Any milestone-level integration validation has passed.
 4. Human review approves milestone completion.
 
 ---
 
-## Agent Roles
+# Agent Roles
 
-The project may use specialized OpenCode agents.
+## Planner
 
-Suggested roles:
-
-### Implementer
 Primary model: Nemotron Ultra
 
 Responsibilities:
+
+- primary interaction point
 - analyze Issues
-- design implementation
-- write code
-- add tests
-- update documentation
+- produce implementation plans
+- obtain human plan approval
+- coordinate specialized agents
+- enforce scope
+- handle material replanning
+- coordinate validation/review failure loops
+- stop at human gates
 
-### Validator
-Primary model: Muse
+The Planner does not implement application code.
 
-Responsibilities:
-- independently validate implementation
-- run tests and checks
-- verify acceptance criteria
-- identify regressions or missing cases
-- produce validation findings
+---
 
-The validator should not silently fix implementation defects unless explicitly instructed.
+## GitHub Manager
 
-### Reviewer
-Primary model: Big Pickle
-
-Responsibilities:
-- review code quality
-- review architecture
-- inspect Issue scope compliance
-- detect unnecessary complexity
-- inspect test quality
-- challenge assumptions
-
-### GitHub Manager
 Primary model: Nemotron Light
 
 Responsibilities:
+
 - Git status checks
+- synchronization
 - branch creation
 - commits
 - push
 - Pull Request creation/update
 - Issue linking
+- Pull Request verification
+- merge after explicit approval
 - post-merge branch cleanup
+
+GitHub operations use:
+
+- `git`
+- authenticated `gh` CLI
+
+GitHub MCP is not used.
+
+The GitHub Manager must not create an Issue branch before Planner approval.
 
 ---
 
-## Architecture Guidance
+## Implementer
+
+Primary model: Nemotron Ultra
+
+Responsibilities:
+
+- follow the approved plan
+- implement Issue scope
+- write code
+- add tests
+- update required documentation
+- report deviations
+
+The Implementer must not make material architectural decisions outside the approved plan.
+
+---
+
+## Validator
+
+Primary model: Muse
+
+Responsibilities:
+
+- independently validate implementation
+- run checks
+- verify acceptance criteria
+- detect regressions
+- verify privacy/data protection
+- produce validation findings
+- produce mandatory validation report
+
+The Validator must not silently repair defects.
+
+---
+
+## Reviewer
+
+Primary model: Big Pickle
+
+Responsibilities:
+
+- independent code review
+- architecture review
+- scope review
+- approved-plan compliance
+- test-quality review
+- maintainability review
+- complexity review
+- privacy/security review
+
+The Reviewer does not implement fixes.
+
+---
+
+# Architecture Guidance
 
 The application is expected to use Python.
 
 Initial architectural direction:
 
 - Python
+- isolated local virtual environment
 - SQLite for local persistence
 - Streamlit for local dashboard
 - pytest for testing
 - Ruff for linting and formatting
 - mypy for static typing when practical
 
-These choices are provisional until explicitly established by project Issues.
+These choices remain provisional until established by approved Issues.
 
-Do not introduce additional frameworks or infrastructure without a documented reason.
+Do not introduce additional frameworks or infrastructure without a documented reason and Planner approval.
 
 ---
 
-## Data Protection
+# Dependency and Environment Guidance
+
+Project dependencies must not be installed globally.
+
+Use an isolated local virtual environment for project dependencies.
+
+The expected initial direction is:
+
+- Python 3.13
+- `uv`
+- project-local `.venv`
+
+These decisions must still be established formally through the corresponding Issue and approved plan.
+
+The local virtual environment must not be committed to Git.
+
+---
+
+# Data Protection
 
 This project may eventually process personal student data locally.
 
@@ -335,13 +637,28 @@ Mandatory rules:
 - Test fixtures must use synthetic data.
 - Logs must not expose unnecessary personal information.
 - Credentials must never be committed.
-- `.gitignore` must protect local data directories and database files.
+- Generated communications containing real student information must remain in ignored local storage.
+- `.gitignore` must protect operational data directories and database files.
 
-GitHub contains code and project documentation, not operational student data.
+When work touches:
+
+- students
+- enrollments
+- progress
+- evaluations
+- communications
+- imports
+- exports
+- logs
+- databases
+
+the `student-data-safety` Skill must be applied.
+
+GitHub contains code and safe project documentation, not operational student data.
 
 ---
 
-## Course Content Integration
+# Course Content Integration
 
 Course contents may live in separate repositories.
 
@@ -353,25 +670,95 @@ Conceptual model:
 
 Course
 → Edition
-→ Student enrollment
+→ Student Enrollment
 → Progress
 → Evaluations
 → Communications
 
 ---
 
-## Current State
+# Skills
 
-No application code exists yet.
+Project Skills are stored under:
 
-Current repository contains only initial project files and this operational harness.
+`.opencode/skills/`
 
-The first implementation Issues will establish:
+Current expected Skills include:
+
+- `issue-workflow`
+- `validation-report`
+- `student-data-safety`
+
+Agents should load relevant Skills when the task requires them.
+
+---
+
+# GitHub Interface
+
+GitHub operations use the authenticated GitHub CLI:
+
+`gh`
+
+Expected commands include, where applicable:
+
+- `gh auth status`
+- `gh repo view`
+- `gh issue list`
+- `gh issue view`
+- `gh pr list`
+- `gh pr create`
+- `gh pr view`
+- `gh pr edit`
+- `gh pr comment`
+- `gh pr checks`
+- `gh pr merge`
+- `gh api`
+
+GitHub MCP is not part of the current project workflow.
+
+---
+
+# Forbidden Actions
+
+Agents must not:
+
+- implement non-trivial Issues without Planner approval
+- create Issue branches before plan approval
+- silently expand Issue scope
+- bypass the Validator
+- bypass the Reviewer
+- skip validation reports
+- merge without explicit human approval
+- push directly to `main`
+- use GitHub MCP
+- commit credentials or secrets
+- commit real student data
+- commit operational ADAMS reports
+- commit databases containing real student data
+- invent unconfirmed ADAMS report formats as definitive
+- delete unmerged branches
+- force-push unless explicitly authorized
+- bypass mandatory failing checks
+
+---
+
+# Current State
+
+The repository currently contains:
+
+- project documentation
+- OpenCode harness
+- specialized agents
+- project Skills
+- GitHub planning files
+- Milestones and Issues already created in GitHub
+
+No application implementation should begin until the relevant Issue passes the Planner approval gate.
+
+The first development Issue is expected to establish:
+
 - project structure
 - Python version
 - dependency management
-- test tooling
-- linting
-- typing
-- local data protection
-- initial application architecture
+- isolated environment
+- minimal executable application 
