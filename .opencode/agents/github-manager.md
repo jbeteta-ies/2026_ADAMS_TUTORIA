@@ -1,7 +1,7 @@
 ---
 description: Handles Git and GitHub workflow mechanics for Issues and Pull Requests using git and the authenticated GitHub CLI.
 mode: subagent
-mmodel: github-copilot/gpt-5.6-luna
+model: github-copilot/gpt-5.6-luna
 temperature: 0.1
 permissions:
   - action: edit
