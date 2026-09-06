@@ -1,12 +1,22 @@
 """Focused tests for the domain entities."""
 
 from dataclasses import FrozenInstanceError, fields
-from datetime import date
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 
-from adams_tutoria.domain import Course, Edition, Enrollment, Student
+from adams_tutoria.domain import (
+    Course,
+    Edition,
+    Enrollment,
+    Evaluation,
+    EvaluationStatus,
+    EvaluationTargetType,
+    ProgressSnapshot,
+    Student,
+)
 
 
 def test_course_stores_identity_and_optional_fields() -> None:
@@ -178,3 +188,144 @@ def test_student_and_enrollment_signatures_are_minimal() -> None:
     assert student_fields[2].default is None
     assert student_fields[3].default is None
     assert enrollment_fields[3].default is None
+
+
+def _enrollment() -> Enrollment:
+    return Enrollment(
+        uuid4(),
+        Student(uuid4(), "Synthetic Student"),
+        Edition(uuid4(), Course(uuid4(), "Synthetic course"), "2026 spring"),
+    )
+
+
+def test_progress_snapshots_are_frozen_and_allow_multiple_observations() -> None:
+    enrollment = _enrollment()
+    first = ProgressSnapshot(uuid4(), enrollment, datetime(2026, 1, 1, tzinfo=UTC), Decimal("0"))
+    second = ProgressSnapshot(uuid4(), enrollment, datetime(2026, 1, 8, tzinfo=UTC), Decimal("100"))
+
+    assert first.enrollment is second.enrollment is enrollment
+    assert first.progress_percentage == Decimal("0")
+    assert first.id != second.id
+    with pytest.raises(FrozenInstanceError):
+        first.progress_percentage = Decimal("1")  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("progress", [Decimal("-0.01"), Decimal("100.01")])
+def test_progress_percentage_is_inclusive_and_bounded(progress: Decimal) -> None:
+    with pytest.raises(ValueError, match="progress_percentage"):
+        ProgressSnapshot(uuid4(), _enrollment(), datetime(2026, 1, 1, tzinfo=UTC), progress)
+
+
+def test_progress_snapshot_rejects_naive_captured_at() -> None:
+    with pytest.raises(ValueError, match="captured_at"):
+        ProgressSnapshot(uuid4(), _enrollment(), datetime(2026, 1, 1), Decimal("50"))
+
+
+def test_evaluation_supports_module_and_activity_targets() -> None:
+    enrollment = _enrollment()
+    module = Evaluation(uuid4(), enrollment, EvaluationTargetType.MODULE, "synthetic-module-1")
+    activity = Evaluation(
+        uuid4(), enrollment, EvaluationTargetType.ACTIVITY, "synthetic-activity-1"
+    )
+
+    assert module.status is EvaluationStatus.PENDING
+    assert activity.target_type is EvaluationTargetType.ACTIVITY
+
+
+def test_evaluation_score_rules_allow_score_without_max_score() -> None:
+    enrollment = _enrollment()
+    result = Evaluation(
+        uuid4(),
+        enrollment,
+        EvaluationTargetType.ACTIVITY,
+        "synthetic-activity-2",
+        EvaluationStatus.COMPLETED,
+        score=Decimal("42.5"),
+    )
+
+    assert result.score == Decimal("42.5")
+    assert result.max_score is None
+
+
+@pytest.mark.parametrize(
+    ("score", "max_score", "message"),
+    [(None, Decimal("10"), "max_score"), (Decimal("11"), Decimal("10"), "score")],
+)
+def test_evaluation_rejects_invalid_score_pairs(
+    score: Decimal | None, max_score: Decimal | None, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        Evaluation(
+            uuid4(),
+            _enrollment(),
+            EvaluationTargetType.MODULE,
+            "synthetic-module-2",
+            EvaluationStatus.COMPLETED,
+            score=score,
+            max_score=max_score,
+        )
+
+
+def test_pending_evaluation_cannot_have_result_data_or_completion_time() -> None:
+    with pytest.raises(ValueError, match="pending"):
+        Evaluation(
+            uuid4(),
+            _enrollment(),
+            EvaluationTargetType.MODULE,
+            "synthetic-module-3",
+            score=Decimal("1"),
+        )
+    with pytest.raises(ValueError, match="pending"):
+        Evaluation(
+            uuid4(),
+            _enrollment(),
+            EvaluationTargetType.MODULE,
+            "synthetic-module-4",
+            completed_at=datetime(2026, 2, 1, tzinfo=UTC),
+        )
+    with pytest.raises(ValueError, match="pending"):
+        Evaluation(
+            uuid4(), _enrollment(), EvaluationTargetType.MODULE, "synthetic-module-6", passed=True
+        )
+
+
+def test_completed_evaluation_may_have_no_result_and_never_derives_passed() -> None:
+    evaluation = Evaluation(
+        uuid4(),
+        _enrollment(),
+        EvaluationTargetType.MODULE,
+        "synthetic-module-5",
+        EvaluationStatus.COMPLETED,
+    )
+
+    assert evaluation.score is None
+    assert evaluation.max_score is None
+    assert evaluation.passed is None
+
+
+def test_completed_evaluation_preserves_explicit_passed_value() -> None:
+    evaluation = Evaluation(
+        uuid4(),
+        _enrollment(),
+        EvaluationTargetType.ACTIVITY,
+        "synthetic-activity-3",
+        EvaluationStatus.COMPLETED,
+        score=Decimal("8"),
+        max_score=Decimal("10"),
+        passed=False,
+        completed_at=datetime(2026, 2, 1, tzinfo=UTC),
+    )
+
+    assert evaluation.passed is False
+
+
+def test_evaluation_rejects_naive_completed_at() -> None:
+    with pytest.raises(ValueError, match="completed_at"):
+        Evaluation(
+            uuid4(),
+            _enrollment(),
+            EvaluationTargetType.MODULE,
+            "synthetic-module-7",
+            EvaluationStatus.COMPLETED,
+            completed_at=datetime(2026, 2, 1),
+        )
