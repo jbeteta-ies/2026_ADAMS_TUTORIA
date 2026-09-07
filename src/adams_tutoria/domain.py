@@ -94,11 +94,14 @@ class ProgressSnapshot:
     enrollment: Enrollment
     captured_at: datetime
     progress_percentage: Decimal
+    external_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_aware(self.captured_at, "captured_at")
         if not Decimal("0") <= self.progress_percentage <= Decimal("100"):
             raise ValueError("progress_percentage must be between 0 and 100")
+        if self.external_id is not None:
+            _require_non_blank(self.external_id, "external_id")
 
 
 class EvaluationTargetType(Enum):
@@ -142,9 +145,15 @@ class Evaluation:
     max_score: Decimal | None = None
     passed: bool | None = None
     completed_at: datetime | None = None
+    target_label: str | None = None
+    external_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_non_blank(self.target_id, "target_id")
+        if self.target_label is not None:
+            _require_non_blank(self.target_label, "target_label")
+        if self.external_id is not None:
+            _require_non_blank(self.external_id, "external_id")
         if self.max_score is not None and self.score is None:
             raise ValueError("max_score requires score")
         if self.score is not None and self.max_score is not None and self.score > self.max_score:

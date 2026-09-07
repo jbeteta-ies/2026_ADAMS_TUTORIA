@@ -132,12 +132,14 @@ The standard-library domain model defines seven frozen entities in
 - `Enrollment(id, student, edition, external_id=None)` represents one
   student's membership in one concrete `Edition` and keeps references to both
   its `Student` and its `Edition`.
-- `ProgressSnapshot(id, enrollment, captured_at, progress_percentage)` records
-  one observation. Multiple snapshots may exist for one enrollment.
+- `ProgressSnapshot(id, enrollment, captured_at, progress_percentage,
+  external_id=None)` records one observation. Multiple snapshots may exist for
+  one enrollment.
   `progress_percentage` is a `Decimal` in the inclusive range 0 through 100,
   and `captured_at` must be timezone-aware.
 - `Evaluation(id, enrollment, target_type, target_id, status=PENDING,
-  score=None, max_score=None, passed=None, completed_at=None)` represents an evaluation at
+  score=None, max_score=None, passed=None, completed_at=None,
+  target_label=None, external_id=None)` represents an evaluation at
   either `MODULE` or `ACTIVITY` level. `PENDING` cannot contain result data or
   a completion time; `COMPLETED` may have no result data. A score may exist
   without a maximum, a maximum requires a score, and a score cannot exceed its

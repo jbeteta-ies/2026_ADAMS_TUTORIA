@@ -1,9 +1,7 @@
 # SQLite persistence parity audit
 
-This audit was performed against the current `domain.py`. `ProgressSnapshot`
-does not currently define `external_id`; `Evaluation` does not currently define
-`target_label` or `external_id`, so those fields are intentionally not added by
-Issue #9.
+This audit covers the current `domain.py`, including the optional external labels
+and identifiers added to progress snapshots and evaluations.
 
 | Entity | Dataclass fields | Schema columns | Write mapping | Read mapping / constructor | Round-trip test |
 | --- | --- | --- | --- | --- | --- |
@@ -11,8 +9,8 @@ Issue #9.
 | Edition | `id`, `course`, `label`, `external_id`, `start_date`, `end_date` | `id`, `course_id`, `label`, `external_id`, `start_date`, `end_date` | `EditionRepository.save` | course lookup + `Edition(...)` | same |
 | Student | `id`, `full_name`, `email`, `external_id` | all four | `StudentRepository.save` | `StudentRepository.get` → `Student(...)` | same |
 | Enrollment | `id`, `student`, `edition`, `external_id` | `id`, `student_id`, `edition_id`, `external_id` | `EnrollmentRepository.save` | relationship lookups + `Enrollment(...)` | same |
-| ProgressSnapshot | `id`, `enrollment`, `captured_at`, `progress_percentage` | `id`, `enrollment_id`, `captured_at`, `progress_percentage` | `ProgressSnapshotRepository.save` | relationship lookup + `ProgressSnapshot(...)` | same; duplicate test |
-| Evaluation | `id`, `enrollment`, `target_type`, `target_id`, `status`, `score`, `max_score`, `passed`, `completed_at` | all nine, with optional values nullable | `EvaluationRepository.save` | enum/scalar conversions + `Evaluation(...)` | same; optional-None and upsert tests |
+| ProgressSnapshot | `id`, `enrollment`, `captured_at`, `progress_percentage`, `external_id` | all five, external_id nullable | `ProgressSnapshotRepository.save` | relationship lookup + `ProgressSnapshot(...)` | value and None round-trips; duplicate test |
+| Evaluation | `id`, `enrollment`, `target_type`, `target_id`, `status`, `score`, `max_score`, `passed`, `completed_at`, `target_label`, `external_id` | all eleven, optional values nullable | `EvaluationRepository.save` | enum/scalar conversions + `Evaluation(...)` | value and None round-trips; upsert test |
 | CommunicationRecord | `id`, `enrollment`, `communication_type`, `reason`, `suggested_at`, `status`, `reviewed_at`, `sent_at`, `deduplication_key`, `context_key` | all ten, with optional timestamps/context nullable | `CommunicationRecordRepository.save` | enum/scalar conversions + `CommunicationRecord(...)` | same; upsert test |
 
 Scalar parity is explicit: UUIDs are text, dates/datetimes are ISO text,

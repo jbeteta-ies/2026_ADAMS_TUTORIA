@@ -150,12 +150,13 @@ class ProgressSnapshotRepository(_Repository):
     def save(self, value: ProgressSnapshot) -> None:
         with connection(self.path) as db:
             db.execute(
-                "INSERT INTO progress_snapshot VALUES(?,?,?,?)",
+                "INSERT INTO progress_snapshot VALUES(?,?,?,?,?)",
                 (
                     to_db(value.id),
                     to_db(value.enrollment.id),
                     to_db(value.captured_at),
                     to_db(value.progress_percentage),
+                    value.external_id,
                 ),
             )
 
@@ -172,6 +173,7 @@ class ProgressSnapshotRepository(_Repository):
                 enrollment,
                 datetime.fromisoformat(row["captured_at"]),
                 Decimal(row["progress_percentage"]),
+                row["external_id"],
             )
         )
 
@@ -182,10 +184,12 @@ class EvaluationRepository(_Repository):
     def save(self, value: Evaluation) -> None:
         with connection(self.path) as db:
             db.execute(
-                """INSERT INTO evaluation VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+                """INSERT INTO evaluation VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET
                 enrollment_id=excluded.enrollment_id,target_type=excluded.target_type,target_id=excluded.target_id,
                 status=excluded.status,score=excluded.score,max_score=excluded.max_score,passed=excluded.passed,
-                completed_at=excluded.completed_at""",
+                completed_at=excluded.completed_at,target_label=excluded.target_label,
+                external_id=excluded.external_id""",
                 (
                     to_db(value.id),
                     to_db(value.enrollment.id),
@@ -196,6 +200,8 @@ class EvaluationRepository(_Repository):
                     to_db(value.max_score),
                     to_db(value.passed),
                     to_db(value.completed_at),
+                    value.target_label,
+                    value.external_id,
                 ),
             )
 
@@ -217,6 +223,8 @@ class EvaluationRepository(_Repository):
                 from_decimal(row["max_score"]),
                 from_bool(row["passed"]),
                 from_datetime(row["completed_at"]),
+                row["target_label"],
+                row["external_id"],
             )
         )
 

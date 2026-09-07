@@ -90,7 +90,7 @@ def test_all_entities_round_trip_every_field_and_relationship(tmp_path: Path) ->
     assert EnrollmentRepository(path).get(enrollment.id) == enrollment
 
     snapshot = ProgressSnapshot(
-        uuid4(), enrollment, datetime(2026, 2, 1, 9, 30, tzinfo=UTC), Decimal("42.50")
+        uuid4(), enrollment, datetime(2026, 2, 1, 9, 30, tzinfo=UTC), Decimal("42.50"), "snapshot-x"
     )
     ProgressSnapshotRepository(path).save(snapshot)
     assert ProgressSnapshotRepository(path).get(snapshot.id) == snapshot
@@ -105,9 +105,23 @@ def test_all_entities_round_trip_every_field_and_relationship(tmp_path: Path) ->
         Decimal("10.00"),
         False,
         datetime(2026, 2, 2, tzinfo=UTC),
+        "Activity X",
+        "evaluation-x",
     )
     EvaluationRepository(path).save(evaluation)
     assert EvaluationRepository(path).get(evaluation.id) == evaluation
+
+    snapshot_none = ProgressSnapshot(
+        uuid4(), enrollment, datetime(2026, 2, 6, tzinfo=UTC), Decimal("10")
+    )
+    ProgressSnapshotRepository(path).save(snapshot_none)
+    assert ProgressSnapshotRepository(path).get(snapshot_none.id) == snapshot_none
+
+    evaluation_none = Evaluation(
+        uuid4(), enrollment, EvaluationTargetType.MODULE, "module", EvaluationStatus.COMPLETED
+    )
+    EvaluationRepository(path).save(evaluation_none)
+    assert EvaluationRepository(path).get(evaluation_none.id) == evaluation_none
 
     communication = CommunicationRecord(
         uuid4(),
