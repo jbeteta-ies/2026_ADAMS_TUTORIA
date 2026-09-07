@@ -109,7 +109,7 @@ or tracked files. There are no environment variables read at import time.
 
 ## Domain model
 
-The standard-library domain model defines four frozen entities in
+The standard-library domain model defines six frozen entities in
 `adams_tutoria.domain`:
 
 - `Course(id, name, code=None, description=None)` is a reusable course
@@ -121,10 +121,28 @@ The standard-library domain model defines four frozen entities in
 - `Enrollment(id, student, edition, external_id=None)` represents one
   student's membership in one concrete `Edition` and keeps references to both
   its `Student` and its `Edition`.
+- `ProgressSnapshot(id, enrollment, captured_at, progress_percentage)` records
+  one observation. Multiple snapshots may exist for one enrollment.
+  `progress_percentage` is a `Decimal` in the inclusive range 0 through 100,
+  and `captured_at` must be timezone-aware.
+- `Evaluation(id, enrollment, target_type, target_id, status=PENDING,
+  score=None, max_score=None, passed=None, completed_at=None)` represents an evaluation at
+  either `MODULE` or `ACTIVITY` level. `PENDING` cannot contain result data or
+  a completion time; `COMPLETED` may have no result data. A score may exist
+  without a maximum, a maximum requires a score, and a score cannot exceed its
+  maximum. Scores use `Decimal` and have no assumed scale. `passed` is an
+  explicit optional boolean and is never derived from the score; `completed_at`,
+  when present, must be timezone-aware.
 
 Several editions may reference the same course. The model is generic and does
 not depend on a particular ADAMS course or external platform. A single
 `Student` can be reused in multiple `Enrollment` records for different
 `Edition` instances, avoiding unnecessary duplication of identity data.
 Required text fields cannot be blank, and an edition cannot end before it
-starts. Persistence and integrations are intentionally outside this model.
+starts. ADAMS report details remain uncertain until real report samples can be
+reviewed; in particular, the relationship between this percentage and the
+ADAMS scale, target identifier mapping, score scale, and passing rules is not
+established by this model. There are
+deliberately no `Module` or `Activity` entities, SCORM fields, attempt counts,
+additional evaluation statuses, persistence, or import logic. All of those
+remain outside this model.
