@@ -8,6 +8,8 @@ from uuid import uuid4
 import pytest
 
 from adams_tutoria.domain import (
+    CommunicationRecord,
+    CommunicationStatus,
     Course,
     Edition,
     Enrollment,
@@ -329,3 +331,191 @@ def test_evaluation_rejects_naive_completed_at() -> None:
             EvaluationStatus.COMPLETED,
             completed_at=datetime(2026, 2, 1),
         )
+
+
+def test_communication_record_stores_enrollment_and_lifecycle_data() -> None:
+    enrollment = _enrollment()
+    suggested_at = datetime(2026, 3, 1, 10, tzinfo=UTC)
+    record = CommunicationRecord(
+        uuid4(),
+        enrollment,
+        "progress.follow_up",
+        "progress.below_threshold",
+        suggested_at,
+        deduplication_key="progress-follow-up:week-10",
+        context_key="week-10",
+    )
+
+    assert record.enrollment is enrollment
+    assert record.status is CommunicationStatus.SUGGESTED
+    assert record.deduplication_key == "progress-follow-up:week-10"
+    assert record.context_key == "week-10"
+    with pytest.raises(FrozenInstanceError):
+        record.status = CommunicationStatus.APPROVED  # type: ignore[misc]
+
+
+def test_communication_record_supports_reviewed_and_sent_states() -> None:
+    enrollment = _enrollment()
+    suggested_at = datetime(2026, 3, 1, 10, tzinfo=UTC)
+    reviewed_at = datetime(2026, 3, 2, 10, tzinfo=UTC)
+    sent_at = datetime(2026, 3, 3, 10, tzinfo=UTC)
+
+    approved = CommunicationRecord(
+        uuid4(),
+        enrollment,
+        "check_in",
+        "inactivity",
+        suggested_at,
+        CommunicationStatus.APPROVED,
+        reviewed_at,
+        None,
+        "check-in:1",
+    )
+    discarded = CommunicationRecord(
+        uuid4(),
+        enrollment,
+        "check_in",
+        "inactivity",
+        suggested_at,
+        CommunicationStatus.DISCARDED,
+        reviewed_at,
+        None,
+        "check-in:2",
+    )
+    sent = CommunicationRecord(
+        uuid4(),
+        enrollment,
+        "check_in",
+        "inactivity",
+        suggested_at,
+        CommunicationStatus.SENT,
+        reviewed_at,
+        sent_at,
+        "check-in:3",
+    )
+
+    assert approved.reviewed_at == discarded.reviewed_at == reviewed_at
+    assert sent.sent_at == sent_at
+
+
+@pytest.mark.parametrize("field_name", ["communication_type", "reason", "deduplication_key"])
+def test_communication_record_rejects_blank_required_codes(field_name: str) -> None:
+    values: dict[str, object] = {
+        "id": uuid4(),
+        "enrollment": _enrollment(),
+        "communication_type": "check_in",
+        "reason": "inactivity",
+        "suggested_at": datetime(2026, 3, 1, tzinfo=UTC),
+        "deduplication_key": "check-in:1",
+    }
+    values[field_name] = " "
+    with pytest.raises(ValueError, match=field_name):
+        CommunicationRecord(**values)  # type: ignore[arg-type]
+
+
+def test_communication_record_rejects_blank_optional_context_key() -> None:
+    with pytest.raises(ValueError, match="context_key"):
+        CommunicationRecord(
+            uuid4(),
+            _enrollment(),
+            "check_in",
+            "inactivity",
+            datetime(2026, 3, 1, tzinfo=UTC),
+            deduplication_key="check-in:1",
+            context_key=" ",
+        )
+
+
+def test_communication_record_requires_aware_timestamps_and_order() -> None:
+    enrollment = _enrollment()
+    suggested_at = datetime(2026, 3, 1, tzinfo=UTC)
+    reviewed_at = datetime(2026, 3, 2, tzinfo=UTC)
+    with pytest.raises(ValueError, match="suggested_at"):
+        CommunicationRecord(
+            uuid4(),
+            enrollment,
+            "check_in",
+            "inactivity",
+            datetime(2026, 3, 1),
+            deduplication_key="k",
+        )
+    with pytest.raises(ValueError, match="reviewed_at"):
+        CommunicationRecord(
+            uuid4(),
+            enrollment,
+            "check_in",
+            "inactivity",
+            suggested_at,
+            CommunicationStatus.APPROVED,
+            datetime(2026, 2, 28, tzinfo=UTC),
+            None,
+            "k",
+        )
+    with pytest.raises(ValueError, match="sent_at"):
+        CommunicationRecord(
+            uuid4(),
+            enrollment,
+            "check_in",
+            "inactivity",
+            suggested_at,
+            CommunicationStatus.SENT,
+            reviewed_at,
+            datetime(2026, 3, 1, tzinfo=UTC),
+            "k",
+        )
+
+
+@pytest.mark.parametrize(
+    ("status", "reviewed_at", "sent_at"),
+    [
+        (CommunicationStatus.SUGGESTED, datetime(2026, 3, 2, tzinfo=UTC), None),
+        (CommunicationStatus.SUGGESTED, None, datetime(2026, 3, 3, tzinfo=UTC)),
+        (CommunicationStatus.APPROVED, None, None),
+        (CommunicationStatus.DISCARDED, None, None),
+        (
+            CommunicationStatus.APPROVED,
+            datetime(2026, 3, 2, tzinfo=UTC),
+            datetime(2026, 3, 3, tzinfo=UTC),
+        ),
+        (CommunicationStatus.SENT, None, datetime(2026, 3, 3, tzinfo=UTC)),
+        (CommunicationStatus.SENT, datetime(2026, 3, 2, tzinfo=UTC), None),
+    ],
+)
+def test_communication_record_enforces_status_timestamp_rules(
+    status: CommunicationStatus, reviewed_at: datetime | None, sent_at: datetime | None
+) -> None:
+    with pytest.raises(ValueError):
+        CommunicationRecord(
+            uuid4(),
+            _enrollment(),
+            "check_in",
+            "inactivity",
+            datetime(2026, 3, 1, tzinfo=UTC),
+            status,
+            reviewed_at,
+            sent_at,
+            "k",
+        )
+
+
+def test_communication_records_may_share_deduplication_keys() -> None:
+    enrollment = _enrollment()
+    key = "progress-follow-up:week-10"
+    first = CommunicationRecord(
+        uuid4(),
+        enrollment,
+        "check_in",
+        "inactivity",
+        datetime(2026, 3, 1, tzinfo=UTC),
+        deduplication_key=key,
+    )
+    second = CommunicationRecord(
+        uuid4(),
+        enrollment,
+        "check_in",
+        "inactivity",
+        datetime(2026, 3, 2, tzinfo=UTC),
+        deduplication_key=key,
+    )
+    assert first.deduplication_key == second.deduplication_key
+    assert first.id != second.id

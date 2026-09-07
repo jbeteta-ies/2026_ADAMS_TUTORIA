@@ -109,7 +109,7 @@ or tracked files. There are no environment variables read at import time.
 
 ## Domain model
 
-The standard-library domain model defines six frozen entities in
+The standard-library domain model defines seven frozen entities in
 `adams_tutoria.domain`:
 
 - `Course(id, name, code=None, description=None)` is a reusable course
@@ -133,6 +133,13 @@ The standard-library domain model defines six frozen entities in
   maximum. Scores use `Decimal` and have no assumed scale. `passed` is an
   explicit optional boolean and is never derived from the score; `completed_at`,
   when present, must be timezone-aware.
+- `CommunicationRecord(id, enrollment, communication_type, reason, suggested_at,
+  status=SUGGESTED, reviewed_at=None, sent_at=None, deduplication_key,
+  context_key=None)` records communication history. Type and reason are
+  structured string codes, not enums or free-text notes. Timestamps are
+  timezone-aware; approval/discard require human review and sent records
+  require both review and send timestamps. The recipient is the `Enrollment`,
+  without duplicating student identity.
 
 Several editions may reference the same course. The model is generic and does
 not depend on a particular ADAMS course or external platform. A single
@@ -145,4 +152,14 @@ ADAMS scale, target identifier mapping, score scale, and passing rules is not
 established by this model. There are
 deliberately no `Module` or `Activity` entities, SCORM fields, attempt counts,
 additional evaluation statuses, persistence, or import logic. All of those
-remain outside this model.
+ remain outside this model.
+
+### Communication history limits
+
+The record stores a caller-provided deduplication key and optional context key,
+but does not calculate keys, query duplicates, or enforce persistence
+uniqueness; historical records may share keys. It does not recommend, generate
+or contain message text, templates, or an ADAMS connector/send method. Human
+review is required and sending remains manual copy/paste into ADAMS. These
+boundaries prepare the model for future Issues #18–#21 (recommendation,
+deduplication, generation, and manual workflow) without implementing them now.
