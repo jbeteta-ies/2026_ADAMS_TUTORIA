@@ -104,6 +104,17 @@ Do not store credentials, session cookies, API keys, real student information,
 or unredacted reports and exports in tracked files. Tests and examples must use
 synthetic data only; versioned test fixtures belong under `tests/fixtures/`.
 
+### SQLite persistence
+
+The persistence layer is in `adams_tutoria.persistence` and uses only Python's
+standard-library `sqlite3`. The operational database is explicitly initialized
+at `AppConfig.local_data_dir/adams_tutoria.sqlite3` by calling
+`initialize_database(database_path(config))`; importing the package never opens a
+database. Persistence tests use only `tmp_path`, never the operational path, and
+contain no real student data. This implementation uses no WAL mode, ORM, or
+migrations. A future Issue may introduce versioned migrations if the schema must
+evolve.
+
 No `.env` loader is used. Do not add real secret values to environment examples
 or tracked files. There are no environment variables read at import time.
 
@@ -121,12 +132,14 @@ The standard-library domain model defines seven frozen entities in
 - `Enrollment(id, student, edition, external_id=None)` represents one
   student's membership in one concrete `Edition` and keeps references to both
   its `Student` and its `Edition`.
-- `ProgressSnapshot(id, enrollment, captured_at, progress_percentage)` records
-  one observation. Multiple snapshots may exist for one enrollment.
+- `ProgressSnapshot(id, enrollment, captured_at, progress_percentage,
+  external_id=None)` records one observation. Multiple snapshots may exist for
+  one enrollment.
   `progress_percentage` is a `Decimal` in the inclusive range 0 through 100,
   and `captured_at` must be timezone-aware.
 - `Evaluation(id, enrollment, target_type, target_id, status=PENDING,
-  score=None, max_score=None, passed=None, completed_at=None)` represents an evaluation at
+  score=None, max_score=None, passed=None, completed_at=None,
+  target_label=None, external_id=None)` represents an evaluation at
   either `MODULE` or `ACTIVITY` level. `PENDING` cannot contain result data or
   a completion time; `COMPLETED` may have no result data. A score may exist
   without a maximum, a maximum requires a score, and a score cannot exceed its

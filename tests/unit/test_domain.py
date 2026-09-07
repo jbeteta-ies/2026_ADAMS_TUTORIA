@@ -223,6 +223,27 @@ def test_progress_snapshot_rejects_naive_captured_at() -> None:
         ProgressSnapshot(uuid4(), _enrollment(), datetime(2026, 1, 1), Decimal("50"))
 
 
+def test_progress_snapshot_external_id_is_optional_and_preserves_value() -> None:
+    enrollment = _enrollment()
+    snapshot = ProgressSnapshot(
+        uuid4(), enrollment, datetime(2026, 1, 1, tzinfo=UTC), Decimal("50"), "snapshot-x"
+    )
+    assert snapshot.external_id == "snapshot-x"
+    assert (
+        ProgressSnapshot(
+            uuid4(), enrollment, datetime(2026, 1, 1, tzinfo=UTC), Decimal("50")
+        ).external_id
+        is None
+    )
+
+
+def test_progress_snapshot_rejects_blank_external_id() -> None:
+    with pytest.raises(ValueError, match="external_id"):
+        ProgressSnapshot(
+            uuid4(), _enrollment(), datetime(2026, 1, 1, tzinfo=UTC), Decimal("50"), " "
+        )
+
+
 def test_evaluation_supports_module_and_activity_targets() -> None:
     enrollment = _enrollment()
     module = Evaluation(uuid4(), enrollment, EvaluationTargetType.MODULE, "synthetic-module-1")
@@ -330,6 +351,35 @@ def test_evaluation_rejects_naive_completed_at() -> None:
             "synthetic-module-7",
             EvaluationStatus.COMPLETED,
             completed_at=datetime(2026, 2, 1),
+        )
+
+
+def test_evaluation_optional_labels_and_external_id_preserve_values_and_none() -> None:
+    enrollment = _enrollment()
+    evaluation = Evaluation(
+        uuid4(),
+        enrollment,
+        EvaluationTargetType.MODULE,
+        "synthetic-module-8",
+        target_label="Synthetic module",
+        external_id="evaluation-x",
+    )
+    assert evaluation.target_label == "Synthetic module"
+    assert evaluation.external_id == "evaluation-x"
+    minimal = Evaluation(uuid4(), enrollment, EvaluationTargetType.MODULE, "synthetic-module-9")
+    assert minimal.target_label is None
+    assert minimal.external_id is None
+
+
+@pytest.mark.parametrize("field_name", ["target_label", "external_id"])
+def test_evaluation_rejects_blank_optional_text(field_name: str) -> None:
+    with pytest.raises(ValueError, match=field_name):
+        Evaluation(
+            uuid4(),
+            _enrollment(),
+            EvaluationTargetType.MODULE,
+            "synthetic-module-10",
+            **{field_name: "  "},
         )
 
 
