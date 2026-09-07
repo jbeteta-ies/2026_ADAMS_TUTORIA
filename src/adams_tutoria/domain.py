@@ -115,6 +115,15 @@ class EvaluationStatus(Enum):
     COMPLETED = "completed"
 
 
+class CommunicationStatus(Enum):
+    """Review and manual-delivery state of a communication record."""
+
+    SUGGESTED = "suggested"
+    APPROVED = "approved"
+    DISCARDED = "discarded"
+    SENT = "sent"
+
+
 @dataclass(frozen=True)
 class Evaluation:
     """An evaluation attached to a module or activity of an enrollment.
@@ -149,3 +158,51 @@ class Evaluation:
             or self.completed_at is not None
         ):
             raise ValueError("pending evaluation cannot contain result data")
+
+
+@dataclass(frozen=True)
+class CommunicationRecord:
+    """A communication event or proposal associated with an enrollment."""
+
+    id: UUID
+    enrollment: Enrollment
+    communication_type: str
+    reason: str
+    suggested_at: datetime
+    status: CommunicationStatus = CommunicationStatus.SUGGESTED
+    reviewed_at: datetime | None = None
+    sent_at: datetime | None = None
+    deduplication_key: str = ""
+    context_key: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_blank(self.communication_type, "communication_type")
+        _require_non_blank(self.reason, "reason")
+        _require_non_blank(self.deduplication_key, "deduplication_key")
+        if self.context_key is not None:
+            _require_non_blank(self.context_key, "context_key")
+
+        _require_aware(self.suggested_at, "suggested_at")
+        if self.reviewed_at is not None:
+            _require_aware(self.reviewed_at, "reviewed_at")
+            if self.reviewed_at < self.suggested_at:
+                raise ValueError("reviewed_at must not be before suggested_at")
+        if self.sent_at is not None:
+            _require_aware(self.sent_at, "sent_at")
+            if self.reviewed_at is None:
+                raise ValueError("sent_at requires reviewed_at")
+            if self.sent_at < self.reviewed_at:
+                raise ValueError("sent_at must not be before reviewed_at")
+
+        if self.status is CommunicationStatus.SUGGESTED:
+            if self.reviewed_at is not None or self.sent_at is not None:
+                raise ValueError("suggested communication cannot be reviewed or sent")
+        elif self.status in (CommunicationStatus.APPROVED, CommunicationStatus.DISCARDED):
+            if self.reviewed_at is None:
+                raise ValueError(f"{self.status.value} communication requires reviewed_at")
+            if self.sent_at is not None:
+                raise ValueError(f"{self.status.value} communication cannot be sent")
+        elif self.status is CommunicationStatus.SENT and (
+            self.reviewed_at is None or self.sent_at is None
+        ):
+            raise ValueError("sent communication requires reviewed_at and sent_at")
