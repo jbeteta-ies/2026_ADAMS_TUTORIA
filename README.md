@@ -176,3 +176,10 @@ or contain message text, templates, or an ADAMS connector/send method. Human
 review is required and sending remains manual copy/paste into ADAMS. These
 boundaries prepare the model for future Issues #18–#21 (recommendation,
 deduplication, generation, and manual workflow) without implementing them now.
+
+### Import contract
+
+The source-independent import boundary is documented in
+[`docs/import-contract.md`](docs/import-contract.md). It defines typed
+candidate records, evidence rules, safe diagnostics, partial-success results,
+and the `ImportAdapter` protocol without implementing source parsing.
