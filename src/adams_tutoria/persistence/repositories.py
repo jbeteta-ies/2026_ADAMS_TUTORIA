@@ -1,9 +1,11 @@
 """Small repositories with explicit mappings (no generic CRUD abstraction)."""
 
 import sqlite3
+from collections.abc import Iterator
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from adams_tutoria.domain import (
@@ -21,6 +23,9 @@ from adams_tutoria.domain import (
 
 from .database import connection
 from .serialization import from_bool, from_date, from_datetime, from_decimal, from_enum, to_db
+
+if TYPE_CHECKING:
+    from adams_tutoria.communication_recommendations import RecommendationHistoryEntry
 
 
 class _Repository:
@@ -235,11 +240,16 @@ class CommunicationRecordRepository(_Repository):
     def save(self, value: CommunicationRecord) -> None:
         with connection(self.path) as db:
             db.execute(
-                """INSERT INTO communication_record VALUES(?,?,?,?,?,?,?,?,?,?)
+                """INSERT INTO communication_record
+                (id,enrollment_id,communication_type,reason,suggested_at,status,reviewed_at,sent_at,
+                 deduplication_key,context_key,recommendation_id,trigger,edition_id,postponed_at,copied_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                 enrollment_id=excluded.enrollment_id,communication_type=excluded.communication_type,reason=excluded.reason,
                 suggested_at=excluded.suggested_at,status=excluded.status,reviewed_at=excluded.reviewed_at,
-                sent_at=excluded.sent_at,deduplication_key=excluded.deduplication_key,context_key=excluded.context_key""",
+                sent_at=excluded.sent_at,deduplication_key=excluded.deduplication_key,context_key=excluded.context_key,
+                recommendation_id=excluded.recommendation_id,trigger=excluded.trigger,edition_id=excluded.edition_id,
+                postponed_at=excluded.postponed_at,copied_at=excluded.copied_at""",
                 (
                     to_db(value.id),
                     to_db(value.enrollment.id),
@@ -251,6 +261,11 @@ class CommunicationRecordRepository(_Repository):
                     to_db(value.sent_at),
                     value.deduplication_key,
                     value.context_key,
+                    value.recommendation_id,
+                    value.trigger,
+                    to_db(value.edition_id),
+                    to_db(value.postponed_at),
+                    to_db(value.copied_at),
                 ),
             )
 
@@ -259,6 +274,7 @@ class CommunicationRecordRepository(_Repository):
         if row is None:
             return None
         enrollment = EnrollmentRepository(self.path).get(UUID(row["enrollment_id"]))
+        columns = set(row.keys())
         return (
             None
             if enrollment is None
@@ -273,5 +289,133 @@ class CommunicationRecordRepository(_Repository):
                 from_datetime(row["sent_at"]),
                 row["deduplication_key"],
                 row["context_key"],
+                row["recommendation_id"] if "recommendation_id" in columns else None,
+                row["trigger"] if "trigger" in columns else None,
+                UUID(row["edition_id"])
+                if "edition_id" in columns and row["edition_id"]
+                else enrollment.edition.id,
+                from_datetime(row["postponed_at"]) if "postponed_at" in columns else None,
+                from_datetime(row["copied_at"]) if "copied_at" in columns else None,
             )
         )
+
+    def list_for_enrollment(
+        self, enrollment_id: UUID, edition_id: UUID | None = None
+    ) -> tuple[CommunicationRecord, ...]:
+        with connection(self.path) as db:
+            query = "SELECT id FROM communication_record WHERE enrollment_id = ?"
+            parameters: list[str] = [str(enrollment_id)]
+            if edition_id is not None:
+                query += " AND (edition_id = ? OR edition_id IS NULL)"
+                parameters.append(str(edition_id))
+            query += " ORDER BY suggested_at, id"
+            ids = [UUID(row["id"]) for row in db.execute(query, parameters)]
+        return tuple(record for record_id in ids if (record := self.get(record_id)) is not None)
+
+    def transition(
+        self, record_id: UUID, status: CommunicationStatus, occurred_at: datetime
+    ) -> None:
+        record = self.get(record_id)
+        if record is None:
+            raise KeyError(record_id)
+        if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+            raise ValueError("occurred_at must be timezone-aware")
+        allowed = {
+            CommunicationStatus.SUGGESTED: {
+                CommunicationStatus.APPROVED,
+                CommunicationStatus.DISCARDED,
+                CommunicationStatus.POSTPONED,
+            },
+            CommunicationStatus.POSTPONED: {
+                CommunicationStatus.APPROVED,
+                CommunicationStatus.DISCARDED,
+            },
+            CommunicationStatus.APPROVED: {CommunicationStatus.COPIED, CommunicationStatus.SENT},
+            CommunicationStatus.COPIED: {CommunicationStatus.SENT},
+            CommunicationStatus.DISCARDED: set(),
+            CommunicationStatus.SENT: set(),
+        }
+        if status not in allowed[record.status]:
+            raise ValueError(
+                f"invalid communication transition: {record.status.value} -> {status.value}"
+            )
+        if occurred_at < record.suggested_at:
+            raise ValueError("transition timestamp must not be before suggested_at")
+        if record.postponed_at is not None and occurred_at < record.postponed_at:
+            raise ValueError("transition timestamp must not be before postponed_at")
+        reviewed_at = (
+            occurred_at
+            if status in (CommunicationStatus.APPROVED, CommunicationStatus.DISCARDED)
+            else record.reviewed_at
+        )
+        sent_at = occurred_at if status is CommunicationStatus.SENT else record.sent_at
+        postponed_at = (
+            occurred_at
+            if status is CommunicationStatus.POSTPONED
+            else None
+            if status in (CommunicationStatus.COPIED, CommunicationStatus.SENT)
+            else record.postponed_at
+        )
+        copied_at = occurred_at if status is CommunicationStatus.COPIED else record.copied_at
+        self.save(
+            CommunicationRecord(
+                record.id,
+                record.enrollment,
+                record.communication_type,
+                record.reason,
+                record.suggested_at,
+                status,
+                reviewed_at,
+                sent_at,
+                record.deduplication_key,
+                record.context_key,
+                record.recommendation_id,
+                record.trigger,
+                record.edition_id,
+                postponed_at,
+                copied_at,
+            )
+        )
+
+
+class CommunicationHistoryAdapter:
+    """Read-only projection for the #20 recommendation history port."""
+
+    def __init__(
+        self,
+        repository: CommunicationRecordRepository,
+        enrollment_id: UUID | None = None,
+        edition_id: UUID | None = None,
+    ) -> None:
+        self.repository, self.enrollment_id, self.edition_id = repository, enrollment_id, edition_id
+
+    def __iter__(self) -> Iterator["RecommendationHistoryEntry"]:
+        from adams_tutoria.communication_recommendations import (
+            RecommendationHistoryEntry,
+            RecommendationStatus,
+        )
+
+        with connection(self.repository.path) as db:
+            query = "SELECT id FROM communication_record WHERE 1=1"
+            params: list[str] = []
+            if self.enrollment_id is not None:
+                query += " AND enrollment_id = ?"
+                params.append(str(self.enrollment_id))
+            if self.edition_id is not None:
+                query += " AND (edition_id = ? OR edition_id IS NULL)"
+                params.append(str(self.edition_id))
+            query += " ORDER BY suggested_at, id"
+            ids = [UUID(row["id"]) for row in db.execute(query, params)]
+        for record_id in ids:
+            record = self.repository.get(record_id)
+            if record is not None and record.recommendation_id is not None:
+                yield RecommendationHistoryEntry(
+                    record.recommendation_id,
+                    record.enrollment.id,
+                    record.edition_id or record.enrollment.edition.id,
+                    record.communication_type,
+                    record.suggested_at,
+                    {
+                        CommunicationStatus.POSTPONED: RecommendationStatus.POSTPONED,
+                    }.get(record.status, record.status),
+                )
