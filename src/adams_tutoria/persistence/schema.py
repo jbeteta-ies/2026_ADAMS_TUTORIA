@@ -1,4 +1,4 @@
-"""The complete, deliberately small SQLite schema for Issue #9."""
+"""The SQLite schema and additive compatibility statements."""
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS course (
@@ -29,6 +29,19 @@ CREATE TABLE IF NOT EXISTS communication_record (
     id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
     communication_type TEXT NOT NULL, reason TEXT NOT NULL, suggested_at TEXT NOT NULL,
     status TEXT NOT NULL, reviewed_at TEXT, sent_at TEXT, deduplication_key TEXT NOT NULL,
-    context_key TEXT
+    context_key TEXT,
+    recommendation_id TEXT,
+    trigger TEXT,
+    edition_id TEXT,
+    postponed_at TEXT,
+    copied_at TEXT
 );
 """
+
+COMMUNICATION_RECORD_ADDITIONS = {
+    "recommendation_id": "TEXT",
+    "trigger": "TEXT",
+    "edition_id": "TEXT",
+    "postponed_at": "TEXT",
+    "copied_at": "TEXT",
+}
