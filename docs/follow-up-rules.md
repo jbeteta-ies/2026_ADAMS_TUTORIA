@@ -51,3 +51,17 @@ La finalización por sí sola no requiere seguimiento, pero puede coexistir con
 cero. La antigüedad se calcula para snapshots de progreso, mientras que las
 evaluaciones pendientes se consideran por matrícula sin una ventana temporal;
 por tanto, ambas reglas tienen una asimetría temporal deliberada.
+
+## Resumen por matrícula
+
+`adams_tutoria.summary.summarize_enrollment` compone un `EnrollmentSummary`
+inmutable para una única matrícula. Recibe `as_of` de forma obligatoria y no
+usa la hora actual del sistema. Aísla snapshots y evaluaciones por matrícula,
+selecciona el último snapshot aplicable y expone su instante como
+`last_progress_at`; ese campo representa progreso observado, no el último
+acceso o login.
+
+El resumen separa estados pendientes/completados de resultados explícitos
+(`passed=True` o `False`). No calcula aprobados o suspensos a partir de
+puntuaciones. El `FollowUpAssessment` se recibe ya calculado y se conserva en
+el DTO; el resumen no vuelve a aplicar las reglas de seguimiento.
