@@ -124,6 +124,8 @@ class CommunicationStatus(Enum):
     SUGGESTED = "suggested"
     APPROVED = "approved"
     DISCARDED = "discarded"
+    POSTPONED = "postponed"
+    COPIED = "copied"
     SENT = "sent"
 
 
@@ -183,6 +185,11 @@ class CommunicationRecord:
     sent_at: datetime | None = None
     deduplication_key: str = ""
     context_key: str | None = None
+    recommendation_id: str | None = None
+    trigger: str | None = None
+    edition_id: UUID | None = None
+    postponed_at: datetime | None = None
+    copied_at: datetime | None = None
 
     def __post_init__(self) -> None:
         _require_non_blank(self.communication_type, "communication_type")
@@ -190,6 +197,12 @@ class CommunicationRecord:
         _require_non_blank(self.deduplication_key, "deduplication_key")
         if self.context_key is not None:
             _require_non_blank(self.context_key, "context_key")
+        if self.recommendation_id is not None:
+            _require_non_blank(self.recommendation_id, "recommendation_id")
+        if self.trigger is not None:
+            _require_non_blank(self.trigger, "trigger")
+        if self.edition_id is None:
+            object.__setattr__(self, "edition_id", self.enrollment.edition.id)
 
         _require_aware(self.suggested_at, "suggested_at")
         if self.reviewed_at is not None:
@@ -202,6 +215,22 @@ class CommunicationRecord:
                 raise ValueError("sent_at requires reviewed_at")
             if self.sent_at < self.reviewed_at:
                 raise ValueError("sent_at must not be before reviewed_at")
+            if self.copied_at is not None and self.sent_at < self.copied_at:
+                raise ValueError("sent_at must not be before copied_at")
+        for field_name, value in (
+            ("postponed_at", self.postponed_at),
+            ("copied_at", self.copied_at),
+        ):
+            if value is not None:
+                _require_aware(value, field_name)
+                if value < self.suggested_at:
+                    raise ValueError(f"{field_name} must not be before suggested_at")
+        if (
+            self.copied_at is not None
+            and self.reviewed_at is not None
+            and self.copied_at < self.reviewed_at
+        ):
+            raise ValueError("copied_at must not be before reviewed_at")
 
         if self.status is CommunicationStatus.SUGGESTED:
             if self.reviewed_at is not None or self.sent_at is not None:
@@ -211,7 +240,36 @@ class CommunicationRecord:
                 raise ValueError(f"{self.status.value} communication requires reviewed_at")
             if self.sent_at is not None:
                 raise ValueError(f"{self.status.value} communication cannot be sent")
+        elif self.status is CommunicationStatus.POSTPONED:
+            if self.postponed_at is None:
+                raise ValueError("postponed communication requires postponed_at")
+            if (
+                self.reviewed_at is not None
+                or self.sent_at is not None
+                or self.copied_at is not None
+            ):
+                raise ValueError("postponed communication cannot be reviewed, copied, or sent")
+        elif self.status is CommunicationStatus.COPIED:
+            if self.reviewed_at is None or self.copied_at is None:
+                raise ValueError("copied communication requires reviewed_at and copied_at")
+            if self.sent_at is not None:
+                raise ValueError("copied communication cannot be sent")
         elif self.status is CommunicationStatus.SENT and (
             self.reviewed_at is None or self.sent_at is None
         ):
             raise ValueError("sent communication requires reviewed_at and sent_at")
+        if (
+            self.status
+            not in (
+                CommunicationStatus.POSTPONED,
+                CommunicationStatus.APPROVED,
+                CommunicationStatus.DISCARDED,
+            )
+            and self.postponed_at is not None
+        ):
+            raise ValueError("postponed_at is only valid before delivery")
+        if (
+            self.status not in (CommunicationStatus.COPIED, CommunicationStatus.SENT)
+            and self.copied_at is not None
+        ):
+            raise ValueError("copied_at requires copied or sent status")
