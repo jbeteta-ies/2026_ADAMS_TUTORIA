@@ -31,6 +31,21 @@ uv run python -m adams_tutoria
 
 Both commands print the application banner and exit.
 
+### Streamlit dashboard
+
+The initial dashboard shell uses only synthetic catalog options and does not
+read SQLite, ADAMS exports, or any operational data. Start it with:
+
+```bash
+uv run streamlit run src/adams_tutoria/dashboard.py
+```
+
+The sidebar provides basic navigation and independent course/edition
+selectors. Editions are filtered by the selected course. The current
+selection is kept in Streamlit session state as `course_id` and `edition_id`.
+Operational indicators and integrations are intentionally placeholders for
+future Issues.
+
 ## Development
 
 ### Tests
