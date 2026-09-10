@@ -8,6 +8,9 @@ from dataclasses import dataclass
 
 import streamlit as st
 
+from adams_tutoria.demo_summary import demo_edition_id, demo_enrollment_summaries
+from adams_tutoria.summary import summarize_edition
+
 
 @dataclass(frozen=True)
 class CourseOption:
@@ -116,7 +119,31 @@ def _render_page(course: CourseOption, edition: EditionOption, page: str) -> Non
         st.title("Edición")
         st.subheader(edition.label)
         st.caption(f"ID estable: {edition.id} · Curso: {course.id}")
-        st.info("Placeholder: aquí se mostrarán futuros indicadores de la edición.")
+        metrics = summarize_edition(
+            demo_edition_id(edition.id), demo_enrollment_summaries(edition.id)
+        )
+        columns = st.columns(6)
+        for column, label, value in zip(
+            columns,
+            (
+                "Total",
+                "No iniciados",
+                "Inactivos",
+                "Evaluaciones pendientes",
+                "Finalizados",
+                "Requieren atención",
+            ),
+            (
+                metrics.total,
+                metrics.not_started,
+                metrics.inactive,
+                metrics.pending_evaluations,
+                metrics.completed,
+                metrics.needs_attention,
+            ),
+            strict=True,
+        ):
+            column.metric(label, value)
 
 
 def main() -> None:
