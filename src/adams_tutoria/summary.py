@@ -48,6 +48,59 @@ class EnrollmentSummary:
         return self.progress.last_progress_at
 
 
+@dataclass(frozen=True)
+class EditionSummary:
+    """Aggregate metrics for the enrollments of one edition."""
+
+    total: int
+    not_started: int
+    inactive: int
+    pending_evaluations: int
+    completed: int
+    needs_attention: int
+
+
+def summarize_edition(
+    edition_id: UUID,
+    summaries: Iterable[EnrollmentSummary],
+) -> EditionSummary:
+    """Aggregate enrollment summaries for exactly ``edition_id``.
+
+    The input is filtered before counting. Identical repeated summaries for one
+    enrollment are accepted and counted once; conflicting repeated summaries
+    raise instead of silently choosing a value. Counts are intentionally based
+    on enrollment IDs rather than student IDs, and reason categories may
+    overlap.
+    """
+
+    unique: dict[UUID, EnrollmentSummary] = {}
+    for summary in summaries:
+        if summary.edition_id != edition_id:
+            continue
+        previous = unique.get(summary.enrollment_id)
+        if previous is not None and previous != summary:
+            raise ValueError(f"conflicting summaries for enrollment {summary.enrollment_id}")
+        unique[summary.enrollment_id] = summary
+
+    return EditionSummary(
+        total=len(unique),
+        not_started=sum(
+            any(reason.code == "not_started" for reason in summary.follow_up.reasons)
+            for summary in unique.values()
+        ),
+        inactive=sum(
+            any(reason.code == "inactive" for reason in summary.follow_up.reasons)
+            for summary in unique.values()
+        ),
+        pending_evaluations=sum(summary.evaluations.pending for summary in unique.values()),
+        completed=sum(
+            any(reason.code == "completed" for reason in summary.follow_up.reasons)
+            for summary in unique.values()
+        ),
+        needs_attention=sum(summary.follow_up.needs_follow_up for summary in unique.values()),
+    )
+
+
 def summarize_enrollment(
     enrollment: Enrollment,
     snapshots: Iterable[ProgressSnapshot],

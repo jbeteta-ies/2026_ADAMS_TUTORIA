@@ -43,8 +43,10 @@ uv run streamlit run src/adams_tutoria/dashboard.py
 The sidebar provides basic navigation and independent course/edition
 selectors. Editions are filtered by the selected course. The current
 selection is kept in Streamlit session state as `course_id` and `edition_id`.
-Operational indicators and integrations are intentionally placeholders for
-future Issues.
+The Edición page currently shows six deterministic metrics over a synthetic
+demo provider: total enrollments, not started, inactive, pending evaluations,
+completed, and cases requiring attention. It does not read SQLite, imports, or
+ADAMS data; an enrollment can contribute to several reason metrics.
 
 ## Development
 
