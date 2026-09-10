@@ -1,0 +1,134 @@
+"""Initial Streamlit shell for the local ADAMS Tutoria dashboard.
+
+This module deliberately contains only synthetic catalog data. Persistence,
+imports, ADAMS integrations, and operational data belong to future Issues.
+"""
+
+from dataclasses import dataclass
+
+import streamlit as st
+
+
+@dataclass(frozen=True)
+class CourseOption:
+    """Synthetic course option with a stable identifier."""
+
+    id: str
+    name: str
+    code: str
+
+
+@dataclass(frozen=True)
+class EditionOption:
+    """Synthetic edition option with a stable identifier and course link."""
+
+    id: str
+    course_id: str
+    label: str
+
+
+COURSES: tuple[CourseOption, ...] = (
+    CourseOption("course-demo-alpha", "Curso de demostración Alpha", "DEMO-A"),
+    CourseOption("course-demo-beta", "Curso de demostración Beta", "DEMO-B"),
+)
+
+EDITIONS: tuple[EditionOption, ...] = (
+    EditionOption("edition-alpha-2026-1", "course-demo-alpha", "Edición 2026 · 1ª convocatoria"),
+    EditionOption("edition-alpha-2026-2", "course-demo-alpha", "Edición 2026 · 2ª convocatoria"),
+    EditionOption("edition-beta-2026-1", "course-demo-beta", "Edición 2026 · 1ª convocatoria"),
+)
+
+
+def editions_for_course(course_id: str) -> tuple[EditionOption, ...]:
+    """Return synthetic editions belonging to *course_id*."""
+
+    return tuple(edition for edition in EDITIONS if edition.course_id == course_id)
+
+
+def _option_label(option: CourseOption | EditionOption) -> str:
+    """Build a stable, human-readable selector label."""
+
+    if isinstance(option, CourseOption):
+        return f"{option.code} — {option.name}"
+    return option.label
+
+
+def _initial_selection() -> None:
+    """Initialize only the dashboard selection state."""
+
+    st.session_state.setdefault("course_id", COURSES[0].id)
+    initial_editions = editions_for_course(st.session_state["course_id"])
+    st.session_state.setdefault("edition_id", initial_editions[0].id)
+
+
+def _render_selection() -> tuple[CourseOption, EditionOption]:
+    """Render independent course/edition selectors and return their values."""
+
+    course_ids = [course.id for course in COURSES]
+    current_course_id = st.session_state["course_id"]
+    if current_course_id not in course_ids:
+        current_course_id = course_ids[0]
+    selected_course_id = st.sidebar.selectbox(
+        "Curso",
+        course_ids,
+        index=course_ids.index(current_course_id),
+        format_func=lambda course_id: _option_label(
+            next(course for course in COURSES if course.id == course_id)
+        ),
+        key="course_id",
+    )
+    selected_editions = editions_for_course(selected_course_id)
+    edition_ids = [edition.id for edition in selected_editions]
+    current_edition_id = st.session_state.get("edition_id")
+    if current_edition_id not in edition_ids:
+        current_edition_id = edition_ids[0]
+        st.session_state["edition_id"] = current_edition_id
+    selected_edition_id = st.sidebar.selectbox(
+        "Edición",
+        edition_ids,
+        index=edition_ids.index(current_edition_id),
+        format_func=lambda edition_id: _option_label(
+            next(edition for edition in selected_editions if edition.id == edition_id)
+        ),
+        key="edition_id",
+    )
+    course = next(course for course in COURSES if course.id == selected_course_id)
+    edition = next(edition for edition in selected_editions if edition.id == selected_edition_id)
+    return course, edition
+
+
+def _render_page(course: CourseOption, edition: EditionOption, page: str) -> None:
+    """Render a placeholder page without loading operational data."""
+
+    if page == "Inicio":
+        st.title("Dashboard de tutoría")
+        st.write("Shell inicial del dashboard local.")
+        st.info(
+            "Los datos mostrados son sintéticos. "
+            "Las fuentes operativas se añadirán en futuras Issues."
+        )
+    elif page == "Curso":
+        st.title("Curso")
+        st.subheader(course.name)
+        st.caption(f"ID estable: {course.id}")
+        st.info("Placeholder: aquí se mostrarán futuros indicadores del curso.")
+    else:
+        st.title("Edición")
+        st.subheader(edition.label)
+        st.caption(f"ID estable: {edition.id} · Curso: {course.id}")
+        st.info("Placeholder: aquí se mostrarán futuros indicadores de la edición.")
+
+
+def main() -> None:
+    """Run the Streamlit dashboard shell."""
+
+    st.set_page_config(page_title="ADAMS Tutoria", page_icon="📚", layout="wide")
+    _initial_selection()
+    st.sidebar.title("Navegación")
+    page = st.sidebar.radio("Sección", ("Inicio", "Curso", "Edición"))
+    course, edition = _render_selection()
+    _render_page(course, edition, page)
+
+
+if __name__ == "__main__":
+    main()
