@@ -87,12 +87,28 @@ PLAN_ITERATION: 0/3
 REVIEW_ITERATION: 0/3
 ```
 
-Increment the relevant plan or review counter for each new plan iteration or
-correction/review cycle. A correction cycle includes the
-Implementer/Validator/Reviewer loop. If any limit is reached, stop
-immediately, explain the limit and current state, and request human
-intervention. Never auto-advance, reset a counter, or treat a limit as
-permission to continue.
+At the start of every new workflow, initialize both counters explicitly to
+`PLAN_ITERATION: 0/3` and `REVIEW_ITERATION: 0/3`. Do not inherit either
+counter from another workflow.
+
+The initial Implementer → Validator → Reviewer sequence is
+`REVIEW_ITERATION: 0/3`. `REVIEW_ITERATION` counts only completed corrective
+Implementer → Validator → Reviewer cycles. An explicit `REQUEST CHANGES`
+starts a corrective cycle but does not increment the counter, either when the
+request is returned or when the cycle is delegated. Keep the current value
+while that cycle is in progress: starting correction and every intermediate
+delegation also leave it unchanged. Increment it once only after the complete
+corrective route has finished. Never increment once per agent. Replanning
+through Planner does not increment `REVIEW_ITERATION`.
+
+For example, if the previous corrective cycle completed at `2/3`, the next
+corrective cycle starts and remains at `2/3`; it becomes `3/3` only after that
+cycle's complete Implementer → Validator → Reviewer route finishes.
+
+Increment `PLAN_ITERATION` only when requesting a new iteration from Planner.
+If any limit is reached, stop immediately, explain the limit and current state,
+and request human intervention. Never auto-advance, reset a counter, or treat a
+limit as permission to continue.
 
 ## Protocol
 
@@ -113,21 +129,36 @@ permission to continue.
 5. After `PLAN APPROVED`, delegate to `implementer`, then `validator`, then
    `reviewer`, passing the approved plan and relevant prior results. Analyze
    the Issue, plan, changes, validation, review, and PR state together.
-6. If Validator requests corrections, delegate `implementer` with those
-   findings, then `validator`, then `reviewer` as needed. If Reviewer requests
-   corrections, use the same Implementer → Validator → Reviewer route. Count
-   each correction/review cycle and stop at its limit.
+6. If Validator or Reviewer returns the explicit result `REQUEST CHANGES`,
+   start the corrective route without changing `REVIEW_ITERATION`. Delegate
+   `implementer` with those findings, then `validator`, then `reviewer` as
+   needed. When that complete corrective Implementer → Validator → Reviewer
+   route has finished, increment `REVIEW_ITERATION` exactly once. A new
+   `REQUEST CHANGES` by itself never increments the counter, and the counter
+   must not change while correction starts or while any intermediate
+   delegation in the route is in progress. Stop at the review limit of `3/3`.
+   A satisfactory initial Implementer → Validator → Reviewer route remains
+   `0/3`.
 7. If the approved plan is no longer adequate or a material deviation is
    needed, stop the correction route and delegate `planner` for replanning.
    Review the complete new plan yourself and return to the PLAN APPROVED gate;
    a prior approval never approves a materially changed plan.
-8. When validation and review are satisfactory, present the PR state and
-   relevant evidence, state that merge will not run yet, and request the exact
-   human message **PR APPROVED**. Do not delegate `github-manager` before it.
+8. When validation and review are satisfactory, delegate `github-manager` for
+   **PR PREPARATION**. This phase is allowed before `PR APPROVED` and must:
+   commit the validated changes, push the Issue branch, create or update the
+   PR, include the final Validator report and Reviewer result, and verify that
+   the published PR exactly matches the validated and reviewed state. It must
+   not merge, close the Issue, delete branches, or perform cleanup in this
+   phase. After preparation, present the PR state and relevant evidence, state
+   that merge and cleanup will not run yet, and request the exact human message
+   **PR APPROVED**.
 9. Treat only the exact, standalone phrase `PR APPROVED` (ignoring case and
    surrounding whitespace) as approval. Reject all ambiguous alternatives and
-   remain stopped while requesting the exact phrase. Only then delegate
-   `github-manager` for the existing final workflow.
+   remain stopped while requesting the exact phrase. Only after that exact
+   gate may you delegate `github-manager` for **FINAL WORKFLOW**: verify the
+   PR and checks, merge, confirm Issue closure when applicable, delete the
+   branches, synchronize `main`, and perform cleanup. No final-workflow action
+   may be delegated before `PR APPROVED`.
 
 At every stop, report the current gate, counters, reason for stopping, and the
 next exact human input required. Human gates are conversational protocol, not
