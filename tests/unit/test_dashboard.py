@@ -18,6 +18,48 @@ def test_streamlit_shell_renders_with_apptest():
     assert app.sidebar.selectbox[1].label == "Edición"
 
 
+def test_edition_page_shows_exactly_six_metrics_and_values() -> None:
+    """The edition placeholder is replaced by the six required indicators."""
+
+    from streamlit.testing.v1 import AppTest
+
+    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
+    app = AppTest.from_file(dashboard_path).run()
+    app.sidebar.radio[0].set_value("Edición").run()
+
+    assert [metric.label for metric in app.metric] == [
+        "Total",
+        "No iniciados",
+        "Inactivos",
+        "Evaluaciones pendientes",
+        "Finalizados",
+        "Requieren atención",
+    ]
+    assert [metric.value for metric in app.metric] == ["2", "1", "1", "2", "0", "2"]
+
+
+def test_changing_edition_is_isolated() -> None:
+    """Changing the selector recomputes only the selected synthetic edition."""
+
+    from streamlit.testing.v1 import AppTest
+
+    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
+    app = AppTest.from_file(dashboard_path).run()
+    app.sidebar.radio[0].set_value("Edición").run()
+    app.sidebar.selectbox[1].set_value("edition-alpha-2026-2").run()
+
+    assert [metric.value for metric in app.metric] == ["1", "0", "0", "0", "1", "0"]
+
+
+def test_dashboard_demo_source_contains_no_operational_data_access() -> None:
+    """The demo provider remains synthetic and privacy-safe."""
+
+    source = (Path(__file__).parents[2] / "src/adams_tutoria/demo_summary.py").read_text()
+    assert "sqlite" not in source.lower()
+    assert "email" not in source.lower()
+    assert "adams export" not in source.lower()
+
+
 def test_course_and_edition_ids_are_stable_and_unique():
     """Catalog identifiers are explicit and unique."""
 
