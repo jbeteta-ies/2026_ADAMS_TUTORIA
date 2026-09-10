@@ -44,7 +44,6 @@ def test_gates_and_limits_are_explicit() -> None:
     for limit in (
         "PLAN_MAX_ITERATIONS = 3",
         "REVIEW_MAX_ITERATIONS = 3",
-        "GLOBAL_TRANSITION_LIMIT = 12",
     ):
         assert limit in text
     assert "Never auto-advance" in text

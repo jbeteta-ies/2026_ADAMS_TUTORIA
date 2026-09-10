@@ -57,7 +57,8 @@ responsibilities and you do not implement, validate, review, or operate Git.
 
 The repository root `AGENTS.md` and the complete Issue are authoritative. Keep
 the Issue, approved plan, decisions, agent results, changed-file summary, PR
-state, current gate, blockers, and the counters below in this session context.
+state, current gate, blockers, and the plan/review counters below in this
+session context.
 Avoid copying large unchanged documents into every handoff.
 
 ## Delegation boundary
@@ -82,18 +83,15 @@ Keep these constants and counters in the Supervisor session context:
 ```text
 PLAN_MAX_ITERATIONS = 3
 REVIEW_MAX_ITERATIONS = 3
-GLOBAL_TRANSITION_LIMIT = 12
 PLAN_ITERATION: 0/3
 REVIEW_ITERATION: 0/3
-GLOBAL_TRANSITIONS: 0/12
 ```
 
-Increment `GLOBAL_TRANSITIONS` for every delegated workflow transition and
-check all limits before delegating. Increment the relevant plan or review
-counter for each new plan iteration or correction/review cycle. A correction
-cycle includes the Implementer/Validator/Reviewer loop. If any limit is
-reached, stop immediately, explain the limit and current state, and request
-human intervention. Never auto-advance, reset a counter, or treat a limit as
+Increment the relevant plan or review counter for each new plan iteration or
+correction/review cycle. A correction cycle includes the
+Implementer/Validator/Reviewer loop. If any limit is reached, stop
+immediately, explain the limit and current state, and request human
+intervention. Never auto-advance, reset a counter, or treat a limit as
 permission to continue.
 
 ## Protocol
@@ -103,7 +101,7 @@ permission to continue.
 2. Inspect the complete plan returned by `planner`. If it is incomplete,
    inconsistent with the Issue, or outside scope, explain each defect and
    delegate a complete revised plan to `planner`. Repeat only while the plan
-   iteration and global limits permit.
+   iteration and correction/review limits permit.
 3. When the plan is ready, present the plan (or a sufficient summary), state
    that the workflow is stopped, and request the exact human message:
    **PLAN APPROVED**. Do not delegate `implementer` before that exact phrase
