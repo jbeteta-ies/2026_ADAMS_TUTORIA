@@ -14,9 +14,9 @@ material replanning back through Planner. The exact standalone phrases
 `PLAN APPROVED` and `PR APPROVED` are required. Responses such as “yes” or
 “continue” are ambiguous and do not pass a gate.
 
-The session limits are three plan iterations, three correction/review cycles,
-and twelve total transitions. Reaching any limit stops the Supervisor and
-requests human intervention; it never advances automatically.
+The session limits are three plan iterations and three correction/review
+cycles. Reaching either limit stops the Supervisor and requests human
+intervention; it never advances automatically.
 
 These are conversational gates in the Supervisor instructions, not global
 OpenCode runtime enforcement. A user can still open another session and call
