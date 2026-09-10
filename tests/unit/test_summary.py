@@ -17,7 +17,7 @@ from adams_tutoria.domain import (
     Student,
 )
 from adams_tutoria.follow_up import FollowUpRules, assess_follow_up
-from adams_tutoria.summary import summarize_enrollment
+from adams_tutoria.summary import summarize_edition, summarize_enrollment
 
 AS_OF = datetime(2026, 4, 1, 12, tzinfo=UTC)
 
@@ -126,3 +126,90 @@ def test_summary_requires_matching_aware_as_of_and_existing_follow_up() -> None:
         summarize_enrollment(enrollment, [], [], mismatched_follow_up, as_of=AS_OF)
     with pytest.raises(ValueError, match="same as_of"):
         summarize_enrollment(enrollment, [], [], follow_up, as_of=AS_OF + timedelta(minutes=1))
+
+
+def test_edition_summary_filters_first_counts_enrollments_and_allows_overlapping_reasons() -> None:
+    first = _enrollment()
+    second = Enrollment(uuid4(), Student(uuid4(), "Otro sintético"), first.edition)
+    other = _enrollment()
+    summaries = []
+    for enrollment, progress, pending in ((first, "0", 1), (second, "20", 1), (other, "100", 0)):
+        evaluations = [
+            Evaluation(uuid4(), enrollment, EvaluationTargetType.ACTIVITY, f"a-{index}")
+            for index in range(pending)
+        ]
+        snapshots = [_snapshot(enrollment, progress, AS_OF - timedelta(days=8))]
+        follow_up = _assessment(enrollment, snapshots, evaluations)
+        summaries.append(
+            summarize_enrollment(enrollment, snapshots, evaluations, follow_up, as_of=AS_OF)
+        )
+
+    result = summarize_edition(first.edition.id, summaries)
+
+    assert result.total == 2
+    assert result.not_started == 1
+    assert result.inactive == 1
+    assert result.pending_evaluations == 2
+    assert result.completed == 0
+    assert result.needs_attention == 2
+
+
+def test_edition_summary_rejects_conflicting_duplicate_enrollment() -> None:
+    enrollment = _enrollment()
+    summary = summarize_enrollment(enrollment, [], [], _assessment(enrollment, [], []), as_of=AS_OF)
+    conflicting = summarize_enrollment(
+        enrollment,
+        [_snapshot(enrollment, "20", AS_OF)],
+        [],
+        _assessment(enrollment, [_snapshot(enrollment, "20", AS_OF)], []),
+        as_of=AS_OF,
+    )
+
+    with pytest.raises(ValueError, match="conflicting summaries"):
+        summarize_edition(enrollment.edition.id, [summary, conflicting])
+
+
+def test_edition_summary_counts_identical_duplicate_once() -> None:
+    enrollment = _enrollment()
+    summary = summarize_enrollment(
+        enrollment,
+        [],
+        [],
+        _assessment(enrollment, [], []),
+        as_of=AS_OF,
+    )
+
+    result = summarize_edition(enrollment.edition.id, [summary, summary])
+
+    assert result.total == 1
+    assert result.not_started == 0
+    assert result.inactive == 0
+    assert result.pending_evaluations == 0
+    assert result.completed == 0
+    assert result.needs_attention == 1
+
+
+def test_edition_summaries_count_same_student_in_both_enrollments() -> None:
+    student = Student(uuid4(), "Alumno sintético compartido")
+    first_edition = Edition(uuid4(), Course(uuid4(), "Curso sintético"), "Edición uno")
+    second_edition = Edition(uuid4(), first_edition.course, "Edición dos")
+    first_enrollment = Enrollment(uuid4(), student, first_edition)
+    second_enrollment = Enrollment(uuid4(), student, second_edition)
+
+    summaries = [
+        summarize_enrollment(
+            enrollment,
+            [],
+            [],
+            _assessment(enrollment, [], []),
+            as_of=AS_OF,
+        )
+        for enrollment in (first_enrollment, second_enrollment)
+    ]
+
+    first_result = summarize_edition(first_edition.id, summaries)
+    second_result = summarize_edition(second_edition.id, summaries)
+
+    assert first_result.total == 1
+    assert second_result.total == 1
+    assert first_result.total + second_result.total == 2
