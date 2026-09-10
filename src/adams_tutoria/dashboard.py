@@ -5,10 +5,22 @@ imports, ADAMS integrations, and operational data belong to future Issues.
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 import streamlit as st
 
+from adams_tutoria.attention import (
+    AttentionConfig,
+    PriorityThresholds,
+    prioritize_attention,
+)
 from adams_tutoria.demo_summary import demo_edition_id, demo_enrollment_summaries
+from adams_tutoria.student_tracking import (
+    filter_tracking_rows,
+    prepare_tracking_rows,
+    select_tracking_detail,
+    sort_tracking_rows,
+)
 from adams_tutoria.summary import summarize_edition
 
 
@@ -144,6 +156,81 @@ def _render_page(course: CourseOption, edition: EditionOption, page: str) -> Non
             strict=True,
         ):
             column.metric(label, value)
+
+        summaries = demo_enrollment_summaries(edition.id)
+        attention = prioritize_attention(
+            summaries,
+            AttentionConfig(
+                {
+                    "progress_unknown": Decimal("3"),
+                    "not_started": Decimal("2"),
+                    "inactive": Decimal("2"),
+                    "pending_evaluations": Decimal("1"),
+                    "completed": Decimal("0"),
+                },
+                PriorityThresholds(Decimal("1"), Decimal("2"), Decimal("3")),
+            ),
+            edition_id=demo_edition_id(edition.id),
+        )
+        rows = prepare_tracking_rows(summaries, attention, demo_edition_id(edition.id))
+        st.subheader("Seguimiento de matrículas")
+        status_options = ["Todos"] + sorted({row.status for row in rows})
+        selected_status = st.selectbox("Estado", status_options, key="tracking_status")
+        alert_filter = st.selectbox(
+            "Alerta", ("Todas", "Con alerta", "Sin alerta"), key="tracking_alert"
+        )
+        sort_options = {
+            "Prioridad": "priority",
+            "Estado": "status",
+            "Progreso": "progress",
+            "Última actividad": "last_activity",
+            "Evaluaciones pendientes": "pending_evaluations",
+        }
+        selected_sort = st.selectbox("Ordenar por", tuple(sort_options), key="tracking_sort")
+        descending = st.checkbox("Orden descendente", key="tracking_descending")
+        visible_rows = filter_tracking_rows(
+            rows,
+            status=None if selected_status == "Todos" else selected_status,
+            alert=None if alert_filter == "Todas" else alert_filter == "Con alerta",
+        )
+        visible_rows = sort_tracking_rows(
+            visible_rows, sort_by=sort_options[selected_sort], descending=descending
+        )
+        table = [
+            {
+                "Matrícula": str(row.enrollment_id),
+                "Estado": row.status,
+                "Progreso": None if row.progress is None else f"{row.progress}%",
+                "Alerta": "Sí" if row.alert else "No",
+                "Prioridad": None if row.priority is None else row.priority.value,
+                "Razón": row.reason,
+                "Última actividad": row.last_activity,
+                "Evaluaciones pendientes": row.pending_evaluations,
+            }
+            for row in visible_rows
+        ]
+        st.dataframe(table, use_container_width=True, hide_index=True)
+        if visible_rows:
+            selected_enrollment = st.selectbox(
+                "Matrícula",
+                [row.enrollment_id for row in visible_rows],
+                format_func=str,
+                key="tracking_enrollment",
+            )
+            detail = select_tracking_detail(summaries, visible_rows, selected_enrollment)
+            if detail is not None:
+                st.caption(f"Detalle de {detail.row.enrollment_id}")
+                st.write(
+                    {
+                        "Estado": detail.row.status,
+                        "Progreso": detail.row.progress,
+                        "Última actividad": detail.row.last_activity,
+                        "Evaluaciones pendientes": detail.summary.evaluations.pending,
+                        "Razones": detail.row.reason,
+                    }
+                )
+        else:
+            st.info("No hay matrículas que coincidan con los filtros.")
 
 
 def main() -> None:
