@@ -54,3 +54,7 @@ def initialize_database(path: Path) -> None:
             "CREATE INDEX IF NOT EXISTS idx_communication_record_edition_time "
             "ON communication_record(edition_id, suggested_at)"
         )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tutor_action_enrollment_time "
+            "ON tutor_action(enrollment_id, occurred_at)"
+        )

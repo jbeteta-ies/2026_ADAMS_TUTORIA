@@ -130,6 +130,21 @@ class CommunicationStatus(Enum):
 
 
 @dataclass(frozen=True)
+class TutorAction:
+    """An action recorded by a tutor, linked only to an enrollment."""
+
+    id: UUID
+    enrollment_id: UUID
+    occurred_at: datetime
+    action: str
+    note: str = ""
+
+    def __post_init__(self) -> None:
+        _require_aware(self.occurred_at, "occurred_at")
+        _require_non_blank(self.action, "action")
+
+
+@dataclass(frozen=True)
 class Evaluation:
     """An evaluation attached to a module or activity of an enrollment.
 
