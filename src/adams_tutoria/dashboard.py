@@ -5,7 +5,9 @@ imports, ADAMS integrations, and operational data belong to future Issues.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 import streamlit as st
 
@@ -14,7 +16,18 @@ from adams_tutoria.attention import (
     PriorityThresholds,
     prioritize_attention,
 )
+from adams_tutoria.config import default_config
+from adams_tutoria.demo_profile import demo_profile
 from adams_tutoria.demo_summary import demo_edition_id, demo_enrollment_summaries
+from adams_tutoria.domain import TutorAction
+from adams_tutoria.persistence.database import database_path, initialize_database
+from adams_tutoria.persistence.repositories import (
+    CourseRepository,
+    EditionRepository,
+    EnrollmentRepository,
+    StudentRepository,
+    TutorActionRepository,
+)
 from adams_tutoria.student_tracking import (
     filter_tracking_rows,
     prepare_tracking_rows,
@@ -229,8 +242,72 @@ def _render_page(course: CourseOption, edition: EditionOption, page: str) -> Non
                         "Razones": detail.row.reason,
                     }
                 )
+                _render_student_profile(detail.row.enrollment_id)
         else:
             st.info("No hay matrículas que coincidan con los filtros.")
+
+
+def _render_student_profile(enrollment_id) -> None:
+    """Render the detail view using one enrollment as its only scope."""
+    config = default_config()
+    path = database_path(config)
+    initialize_database(path)
+    actions_repository = TutorActionRepository(path)
+    try:
+        profile = demo_profile(enrollment_id, actions_repository.list_for_enrollment(enrollment_id))
+    except StopIteration:
+        st.info("La ficha sintética no está disponible para esta matrícula.")
+        return
+    CourseRepository(path).save(profile.enrollment.edition.course)
+    EditionRepository(path).save(profile.enrollment.edition)
+    StudentRepository(path).save(profile.enrollment.student)
+    EnrollmentRepository(path).save(profile.enrollment)
+    profile = demo_profile(enrollment_id, actions_repository.list_for_enrollment(enrollment_id))
+    st.subheader("Ficha de alumno")
+    st.caption(f"Matrícula: {profile.enrollment.id}")
+    st.write(
+        {
+            "Alumno": profile.enrollment.student.full_name,
+            "Correo": profile.enrollment.student.email,
+            "Progreso": profile.summary.progress.percentage,
+            "Evaluaciones pendientes": profile.summary.evaluations.pending,
+        }
+    )
+    st.write("**Evaluaciones**", [evaluation.target_id for evaluation in profile.evaluations])
+    st.write(
+        "**Alertas y seguimiento**",
+        [reason.explanation for reason in profile.summary.follow_up.reasons],
+    )
+    st.write(
+        "**Historial de progreso**",
+        [
+            {
+                "captured_at": snapshot.captured_at.isoformat(),
+                "progress": snapshot.progress_percentage,
+            }
+            for snapshot in profile.snapshots
+        ],
+    )
+    st.write("**Comunicaciones sugeridas**", [record.reason for record in profile.communications])
+    st.write("**Acciones del tutor**", [action.action for action in profile.actions])
+    with st.form(f"tutor-action-{enrollment_id}"):
+        action = st.text_input("Nueva acción del tutor")
+        note = st.text_area("Nota de la acción")
+        if st.form_submit_button("Registrar acción"):
+            if action.strip():
+                actions_repository.save(
+                    TutorAction(
+                        id=uuid4(),
+                        enrollment_id=enrollment_id,
+                        occurred_at=datetime.now(UTC),
+                        action=action.strip(),
+                        note=note.strip(),
+                    )
+                )
+                st.success("Acción registrada en el historial local de tutoría.")
+                st.rerun()
+            else:
+                st.warning("Escribe una acción antes de registrar.")
 
 
 def main() -> None:

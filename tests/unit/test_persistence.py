@@ -20,6 +20,7 @@ from adams_tutoria.domain import (
     EvaluationTargetType,
     ProgressSnapshot,
     Student,
+    TutorAction,
 )
 from adams_tutoria.persistence.database import connection, database_path, initialize_database
 from adams_tutoria.persistence.repositories import (
@@ -30,6 +31,7 @@ from adams_tutoria.persistence.repositories import (
     EvaluationRepository,
     ProgressSnapshotRepository,
     StudentRepository,
+    TutorActionRepository,
 )
 
 
@@ -67,6 +69,7 @@ def test_initialization_is_idempotent_and_has_all_tables(tmp_path: Path) -> None
             "progress_snapshot",
             "evaluation",
             "communication_record",
+            "tutor_action",
         }
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
@@ -190,3 +193,31 @@ def test_operational_path_is_not_touched_by_persistence_tests(tmp_path: Path) ->
     config = default_config(base_dir=tmp_path)
     assert database_path(config) == tmp_path / "data" / "local" / "adams_tutoria.sqlite3"
     assert not database_path(config).exists()
+
+
+def test_tutor_actions_are_persisted_separately_and_scoped(tmp_path: Path) -> None:
+    path = tmp_path / "actions.sqlite3"
+    *_, enrollment = _ready(path)
+    action = TutorActionRepository(path)
+    value = TutorAction(
+        uuid4(), enrollment.id, datetime(2026, 2, 1, tzinfo=UTC), "Revisar", "synthetic"
+    )
+    action.save(value)
+    assert action.get(value.id) == value
+    assert action.list_for_enrollment(enrollment.id) == (value,)
+
+
+def test_tutor_actions_round_trip_does_not_leak_between_enrollments(tmp_path: Path) -> None:
+    path = tmp_path / "scoped-actions.sqlite3"
+    *_, enrollment = _ready(path)
+    other = Enrollment(uuid4(), enrollment.student, enrollment.edition)
+    EnrollmentRepository(path).save(other)
+    repository = TutorActionRepository(path)
+    first = TutorAction(uuid4(), enrollment.id, datetime(2026, 2, 1, tzinfo=UTC), "Primera")
+    second = TutorAction(uuid4(), other.id, datetime(2026, 2, 2, tzinfo=UTC), "Segunda")
+
+    repository.save(first)
+    repository.save(second)
+
+    assert repository.list_for_enrollment(enrollment.id) == (first,)
+    assert repository.list_for_enrollment(other.id) == (second,)

@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS communication_record (
     postponed_at TEXT,
     copied_at TEXT
 );
+CREATE TABLE IF NOT EXISTS tutor_action (
+    id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
+    occurred_at TEXT NOT NULL, action TEXT NOT NULL, note TEXT NOT NULL DEFAULT ''
+);
 """
 
 COMMUNICATION_RECORD_ADDITIONS = {
