@@ -2,7 +2,9 @@
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS course (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL, code TEXT, description TEXT
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, code TEXT, description TEXT,
+    content_source_type TEXT, content_source_location TEXT,
+    content_source_subpath TEXT, content_source_revision TEXT
 );
 CREATE TABLE IF NOT EXISTS edition (
     id TEXT PRIMARY KEY, course_id TEXT NOT NULL REFERENCES course(id), label TEXT NOT NULL,
@@ -41,6 +43,13 @@ CREATE TABLE IF NOT EXISTS tutor_action (
     occurred_at TEXT NOT NULL, action TEXT NOT NULL, note TEXT NOT NULL DEFAULT ''
 );
 """
+
+COURSE_ADDITIONS = {
+    "content_source_type": "TEXT",
+    "content_source_location": "TEXT",
+    "content_source_subpath": "TEXT",
+    "content_source_revision": "TEXT",
+}
 
 COMMUNICATION_RECORD_ADDITIONS = {
     "recommendation_id": "TEXT",

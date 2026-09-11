@@ -10,6 +10,8 @@ import pytest
 from adams_tutoria.domain import (
     CommunicationRecord,
     CommunicationStatus,
+    ContentSource,
+    ContentSourceType,
     Course,
     Edition,
     Enrollment,
@@ -29,6 +31,25 @@ def test_course_stores_identity_and_optional_fields() -> None:
     assert course.name == "Synthetic course"
     assert course.code == "SYN-001"
     assert course.description == "A test course"
+
+
+def test_course_can_reference_a_content_source() -> None:
+    source = ContentSource(
+        ContentSourceType.REPOSITORY, "https://example.invalid/content", "docs", "v1"
+    )
+    course = Course(uuid4(), "Synthetic course", content_source=source)
+    assert course.content_source is source
+
+
+@pytest.mark.parametrize("field_name", ["location", "subpath", "revision"])
+def test_content_source_rejects_blank_text(field_name: str) -> None:
+    values: dict[str, object] = {
+        "source_type": ContentSourceType.LOCAL_PATH,
+        "location": "synthetic/content",
+    }
+    values[field_name] = " "
+    with pytest.raises(ValueError, match=field_name):
+        ContentSource(**values)  # type: ignore[arg-type]
 
 
 def test_edition_references_course_directly_and_defaults_optionals() -> None:
@@ -87,7 +108,13 @@ def test_entity_signatures_keep_explicit_uuid_identity_and_optional_defaults() -
     course_fields = fields(Course)
     edition_fields = fields(Edition)
 
-    assert [field.name for field in course_fields] == ["id", "name", "code", "description"]
+    assert [field.name for field in course_fields] == [
+        "id",
+        "name",
+        "code",
+        "description",
+        "content_source",
+    ]
     assert [field.name for field in edition_fields] == [
         "id",
         "course",
@@ -98,6 +125,7 @@ def test_entity_signatures_keep_explicit_uuid_identity_and_optional_defaults() -
     ]
     assert course_fields[2].default is None
     assert course_fields[3].default is None
+    assert course_fields[4].default is None
     assert edition_fields[3].default is None
     assert edition_fields[4].default is None
     assert edition_fields[5].default is None
