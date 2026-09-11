@@ -51,6 +51,22 @@ def test_changing_edition_is_isolated() -> None:
     assert [metric.value for metric in app.metric] == ["1", "0", "0", "0", "1", "0"]
 
 
+def test_beta_enrollment_without_follow_up_reasons_renders_profile() -> None:
+    """The Beta profile remains usable when no follow-up communication is suggested."""
+
+    from streamlit.testing.v1 import AppTest
+
+    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
+    app = AppTest.from_file(dashboard_path).run()
+    app.sidebar.radio[0].set_value("Edición").run()
+    app.sidebar.selectbox[0].set_value("course-demo-beta").run()
+    app.sidebar.selectbox[1].set_value("edition-beta-2026-1").run()
+    app.selectbox[-1].set_value(app.selectbox[-1].options[0]).run()
+
+    assert not app.exception
+    assert app.subheader[-1].value == "Ficha de alumno"
+
+
 def test_dashboard_demo_source_contains_no_operational_data_access() -> None:
     """The demo provider remains synthetic and privacy-safe."""
 
