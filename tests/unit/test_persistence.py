@@ -12,6 +12,8 @@ from adams_tutoria.config import default_config
 from adams_tutoria.domain import (
     CommunicationRecord,
     CommunicationStatus,
+    ContentSource,
+    ContentSourceType,
     Course,
     Edition,
     Enrollment,
@@ -78,13 +80,35 @@ def test_connection_rolls_back_and_closes_transaction(tmp_path: Path) -> None:
     path = tmp_path / "transaction.sqlite3"
     initialize_database(path)
     with pytest.raises(RuntimeError), connection(path) as db:
-        db.execute("INSERT INTO course VALUES(?,?,?,?)", ("rollback", "x", None, None))
+        db.execute(
+            "INSERT INTO course(id,name,code,description) VALUES(?,?,?,?)",
+            ("rollback", "x", None, None),
+        )
         raise RuntimeError("synthetic failure")
     with connection(path) as db:
         assert db.execute("SELECT * FROM course").fetchone() is None
 
 
 def test_all_entities_round_trip_every_field_and_relationship(tmp_path: Path) -> None:
+    path = tmp_path / "entities.sqlite3"
+    course, edition, student, enrollment = _ready(path)
+    assert CourseRepository(path).get(course.id) == course
+    assert EditionRepository(path).get(edition.id) == edition
+    assert StudentRepository(path).get(student.id) == student
+    assert EnrollmentRepository(path).get(enrollment.id) == enrollment
+
+
+def test_course_content_source_round_trip_and_reinitialization(tmp_path: Path) -> None:
+    path = tmp_path / "content.sqlite3"
+    initialize_database(path)
+    source = ContentSource(ContentSourceType.LOCAL_PATH, "synthetic/content", "markdown", "r1")
+    course = Course(uuid4(), "Synthetic course", content_source=source)
+    CourseRepository(path).save(course)
+    initialize_database(path)
+    assert CourseRepository(path).get(course.id) == course
+
+
+def test_all_entities_round_trip_continues_after_content_source_test(tmp_path: Path) -> None:
     path = tmp_path / "entities.sqlite3"
     course, edition, student, enrollment = _ready(path)
     assert CourseRepository(path).get(course.id) == course

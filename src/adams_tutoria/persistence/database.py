@@ -7,7 +7,7 @@ from pathlib import Path
 
 from adams_tutoria.config import AppConfig
 
-from .schema import COMMUNICATION_RECORD_ADDITIONS, SCHEMA
+from .schema import COMMUNICATION_RECORD_ADDITIONS, COURSE_ADDITIONS, SCHEMA
 
 DATABASE_FILENAME = "adams_tutoria.sqlite3"
 
@@ -42,6 +42,10 @@ def initialize_database(path: Path) -> None:
 
     with connection(path) as db:
         db.executescript(SCHEMA)
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(course)")}
+        for name, definition in COURSE_ADDITIONS.items():
+            if name not in columns:
+                db.execute(f"ALTER TABLE course ADD COLUMN {name} {definition}")
         columns = {row["name"] for row in db.execute("PRAGMA table_info(communication_record)")}
         for name, definition in COMMUNICATION_RECORD_ADDITIONS.items():
             if name not in columns:
