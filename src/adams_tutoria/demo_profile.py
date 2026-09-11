@@ -70,7 +70,7 @@ def demo_profile(enrollment_id: UUID, actions: tuple[TutorAction, ...] = ()) -> 
             CommunicationRecord(
                 uuid5(NAMESPACE_URL, f"communication:{enrollment_id}"),
                 enrollment,
-                "check_in",
+                "inactivity_reminder",
                 summary.follow_up.reasons[0].explanation,
                 now,
                 deduplication_key=f"demo-check-in:{enrollment_id}",
