@@ -19,9 +19,11 @@ from adams_tutoria.attention import (
 from adams_tutoria.config import default_config
 from adams_tutoria.demo_profile import demo_profile
 from adams_tutoria.demo_summary import demo_edition_id, demo_enrollment_summaries
-from adams_tutoria.domain import TutorAction
+from adams_tutoria.domain import CommunicationStatus, TutorAction
+from adams_tutoria.message_templates import MessageContext, render_message
 from adams_tutoria.persistence.database import database_path, initialize_database
 from adams_tutoria.persistence.repositories import (
+    CommunicationRecordRepository,
     CourseRepository,
     EditionRepository,
     EnrollmentRepository,
@@ -253,6 +255,7 @@ def _render_student_profile(enrollment_id) -> None:
     path = database_path(config)
     initialize_database(path)
     actions_repository = TutorActionRepository(path)
+    communications_repository = CommunicationRecordRepository(path)
     try:
         profile = demo_profile(enrollment_id, actions_repository.list_for_enrollment(enrollment_id))
     except StopIteration:
@@ -262,6 +265,9 @@ def _render_student_profile(enrollment_id) -> None:
     EditionRepository(path).save(profile.enrollment.edition)
     StudentRepository(path).save(profile.enrollment.student)
     EnrollmentRepository(path).save(profile.enrollment)
+    for communication in profile.communications:
+        if communications_repository.get(communication.id) is None:
+            communications_repository.save(communication)
     profile = demo_profile(enrollment_id, actions_repository.list_for_enrollment(enrollment_id))
     st.subheader("Ficha de alumno")
     st.caption(f"Matrícula: {profile.enrollment.id}")
@@ -288,7 +294,8 @@ def _render_student_profile(enrollment_id) -> None:
             for snapshot in profile.snapshots
         ],
     )
-    st.write("**Comunicaciones sugeridas**", [record.reason for record in profile.communications])
+    if profile.communications:
+        _render_communications(profile, communications_repository)
     st.write("**Acciones del tutor**", [action.action for action in profile.actions])
     with st.form(f"tutor-action-{enrollment_id}"):
         action = st.text_input("Nueva acción del tutor")
@@ -308,6 +315,67 @@ def _render_student_profile(enrollment_id) -> None:
                 st.rerun()
             else:
                 st.warning("Escribe una acción antes de registrar.")
+
+
+def _render_communications(profile, repository: CommunicationRecordRepository) -> None:
+    """Show approved messages and record only explicit manual tutor actions."""
+    communications = repository.list_for_enrollment(profile.enrollment.id)
+    st.subheader("Comunicaciones")
+    if not communications:
+        st.info("No hay comunicaciones sugeridas.")
+        return
+    for communication in communications:
+        st.markdown(
+            f"**{communication.communication_type}** · estado: `{communication.status.value}`"
+        )
+        st.caption(f"Motivo: {communication.reason}")
+        if communication.status is CommunicationStatus.SUGGESTED:
+            if st.button("Aprobar mensaje para revisión", key=f"approve-{communication.id}"):
+                repository.transition(
+                    communication.id, CommunicationStatus.APPROVED, datetime.now(UTC)
+                )
+                st.rerun()
+            st.info("Aprueba la sugerencia para mostrar el mensaje completo.")
+            continue
+        if communication.status in (CommunicationStatus.APPROVED, CommunicationStatus.COPIED):
+            message = render_message(
+                communication.communication_type,
+                MessageContext(
+                    name=profile.enrollment.student.full_name,
+                    course=profile.enrollment.edition.course.name,
+                    edition=profile.enrollment.edition.label,
+                    context=communication.reason,
+                ),
+            )
+            st.text_area(
+                "Mensaje completo (selección manual)",
+                value=message,
+                height=160,
+                key=f"message-{communication.id}",
+                disabled=True,
+            )
+            st.download_button(
+                "Descargar mensaje para copiar manualmente",
+                data=message,
+                file_name=f"mensaje-{communication.id}.txt",
+                mime="text/plain",
+                key=f"download-{communication.id}",
+            )
+            if communication.status is CommunicationStatus.APPROVED and st.button(
+                "Registrar COPIED (ya copié el mensaje)", key=f"copied-{communication.id}"
+            ):
+                repository.transition(
+                    communication.id, CommunicationStatus.COPIED, datetime.now(UTC)
+                )
+                st.rerun()
+            if communication.status is CommunicationStatus.COPIED and st.button(
+                "Registrar SENT (ya lo envié manualmente en ADAMS)",
+                key=f"sent-{communication.id}",
+            ):
+                repository.transition(communication.id, CommunicationStatus.SENT, datetime.now(UTC))
+                st.rerun()
+        elif communication.status is CommunicationStatus.SENT:
+            st.success("SENT registrado tras confirmación manual del tutor en ADAMS.")
 
 
 def main() -> None:

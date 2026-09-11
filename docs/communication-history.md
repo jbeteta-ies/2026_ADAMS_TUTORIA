@@ -11,6 +11,16 @@ reabrir. `APPROVED -> SENT` se permite directamente y deja `copied_at` en
 `sent_at >= copied_at` cuando existe, y todas deben incluir zona horaria.
 `postponed_at` se conserva al aprobar o descartar una comunicación pospuesta.
 
+## Copia y envío manual
+
+El dashboard muestra el mensaje completo únicamente después de que el tutor
+aprueba explícitamente la sugerencia. El tutor puede seleccionarlo o descargar
+un fichero de texto para copiarlo manualmente en ADAMS; esas acciones no hacen
+ninguna llamada externa. Después de copiarlo, debe pulsar la acción explícita
+que registra `COPIED`. Tras realizar el envío manual en ADAMS, debe pulsar la
+acción separada que registra `SENT`. El texto renderizado no se persiste: el
+historial conserva solo estados y marcas temporales.
+
 La inicialización evoluciona bases existentes únicamente de forma aditiva:
 añade las cinco columnas nuevas e índices si faltan, conservando las diez
 columnas y filas anteriores. No hay migración destructiva ni segunda base de
