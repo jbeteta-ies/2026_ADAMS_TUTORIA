@@ -144,8 +144,10 @@ The standard-library domain model defines seven frozen entities in
   definition. Its UUID identity is supplied by the caller.
 - `ContentSource(source_type, location, subpath=None, revision=None)` is an
   optional per-course reference. `source_type` is `local_path` or `repository`.
-  The metadata is stored only as a reference; this application does not clone,
-  synchronize, index, or search the referenced content.
+  The metadata is stored as a reference. Local Markdown indexing and search
+  are documented in [`docs/content-search.md`](docs/content-search.md).
+  Repository sources are treated only as already available local checkouts;
+  no cloning or synchronization is performed.
 - `Edition(id, course, label, external_id=None, start_date=None, end_date=None)`
   is one concrete edition and keeps a direct reference to its `Course`.
 - `Student(id, full_name, email=None, external_id=None)` represents a student's
