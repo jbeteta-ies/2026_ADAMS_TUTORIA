@@ -25,11 +25,36 @@ class Course:
     name: str
     code: str | None = None
     description: str | None = None
+    content_source: "ContentSource | None" = None
 
     def __post_init__(self) -> None:
         _require_non_blank(self.name, "name")
         if self.code is not None:
             _require_non_blank(self.code, "code")
+
+
+class ContentSourceType(Enum):
+    """Supported locations from which a course may later read content."""
+
+    LOCAL_PATH = "local_path"
+    REPOSITORY = "repository"
+
+
+@dataclass(frozen=True)
+class ContentSource:
+    """A reference to course content without copying or accessing that content."""
+
+    source_type: ContentSourceType
+    location: str
+    subpath: str | None = None
+    revision: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_blank(self.location, "location")
+        if self.subpath is not None:
+            _require_non_blank(self.subpath, "subpath")
+        if self.revision is not None:
+            _require_non_blank(self.revision, "revision")
 
 
 @dataclass(frozen=True)

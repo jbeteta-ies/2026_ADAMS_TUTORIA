@@ -11,6 +11,8 @@ from uuid import UUID
 from adams_tutoria.domain import (
     CommunicationRecord,
     CommunicationStatus,
+    ContentSource,
+    ContentSourceType,
     Course,
     Edition,
     Enrollment,
@@ -48,10 +50,26 @@ class CourseRepository(_Repository):
     def save(self, value: Course) -> None:
         with connection(self.path) as db:
             db.execute(
-                """INSERT INTO course(id,name,code,description) VALUES(?,?,?,?)
+                """INSERT INTO course(
+                id,name,code,description,content_source_type,content_source_location,
+                content_source_subpath,content_source_revision) VALUES(?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET name=excluded.name, code=excluded.code,
-                description=excluded.description""",
-                (to_db(value.id), value.name, value.code, value.description),
+                description=excluded.description, content_source_type=excluded.content_source_type,
+                content_source_location=excluded.content_source_location,
+                content_source_subpath=excluded.content_source_subpath,
+                content_source_revision=excluded.content_source_revision""",
+                (
+                    to_db(value.id),
+                    value.name,
+                    value.code,
+                    value.description,
+                    None
+                    if value.content_source is None
+                    else to_db(value.content_source.source_type),
+                    None if value.content_source is None else value.content_source.location,
+                    None if value.content_source is None else value.content_source.subpath,
+                    None if value.content_source is None else value.content_source.revision,
+                ),
             )
 
     def get(self, record_id: UUID) -> Course | None:
@@ -59,7 +77,20 @@ class CourseRepository(_Repository):
         return (
             None
             if row is None
-            else Course(UUID(row["id"]), row["name"], row["code"], row["description"])
+            else Course(
+                UUID(row["id"]),
+                row["name"],
+                row["code"],
+                row["description"],
+                None
+                if row["content_source_type"] is None
+                else ContentSource(
+                    ContentSourceType(row["content_source_type"]),
+                    row["content_source_location"],
+                    row["content_source_subpath"],
+                    row["content_source_revision"],
+                ),
+            )
         )
 
 
