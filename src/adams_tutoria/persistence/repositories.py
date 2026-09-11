@@ -19,6 +19,7 @@ from adams_tutoria.domain import (
     EvaluationTargetType,
     ProgressSnapshot,
     Student,
+    TutorAction,
 )
 
 from .database import connection
@@ -182,6 +183,18 @@ class ProgressSnapshotRepository(_Repository):
             )
         )
 
+    def list_for_enrollment(self, enrollment_id: UUID) -> tuple[ProgressSnapshot, ...]:
+        with connection(self.path) as db:
+            ids = [
+                UUID(row["id"])
+                for row in db.execute(
+                    "SELECT id FROM progress_snapshot WHERE enrollment_id = ? "
+                    "ORDER BY captured_at, id",
+                    (str(enrollment_id),),
+                )
+            ]
+        return tuple(record for record_id in ids if (record := self.get(record_id)) is not None)
+
 
 class EvaluationRepository(_Repository):
     table = "evaluation"
@@ -232,6 +245,63 @@ class EvaluationRepository(_Repository):
                 row["external_id"],
             )
         )
+
+    def list_for_enrollment(self, enrollment_id: UUID) -> tuple[Evaluation, ...]:
+        with connection(self.path) as db:
+            ids = [
+                UUID(row["id"])
+                for row in db.execute(
+                    "SELECT id FROM evaluation WHERE enrollment_id = ? ORDER BY id",
+                    (str(enrollment_id),),
+                )
+            ]
+        return tuple(record for record_id in ids if (record := self.get(record_id)) is not None)
+
+
+class TutorActionRepository(_Repository):
+    """Persistence for tutor workflow logs, kept separate from personal data."""
+
+    table = "tutor_action"
+
+    def save(self, value: TutorAction) -> None:
+        with connection(self.path) as db:
+            db.execute(
+                """INSERT INTO tutor_action VALUES(?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET enrollment_id=excluded.enrollment_id,
+                occurred_at=excluded.occurred_at, action=excluded.action, note=excluded.note""",
+                (
+                    to_db(value.id),
+                    to_db(value.enrollment_id),
+                    to_db(value.occurred_at),
+                    value.action,
+                    value.note,
+                ),
+            )
+
+    def get(self, record_id: UUID) -> TutorAction | None:
+        row = self._row(record_id)
+        return (
+            None
+            if row is None
+            else TutorAction(
+                UUID(row["id"]),
+                UUID(row["enrollment_id"]),
+                datetime.fromisoformat(row["occurred_at"]),
+                row["action"],
+                row["note"],
+            )
+        )
+
+    def list_for_enrollment(self, enrollment_id: UUID) -> tuple[TutorAction, ...]:
+        with connection(self.path) as db:
+            ids = [
+                UUID(row["id"])
+                for row in db.execute(
+                    "SELECT id FROM tutor_action WHERE enrollment_id = ? ORDER BY occurred_at, id",
+                    (str(enrollment_id),),
+                )
+            ]
+        return tuple(record for record_id in ids if (record := self.get(record_id)) is not None)
 
 
 class CommunicationRecordRepository(_Repository):
