@@ -27,6 +27,19 @@ must never retain the raw row or personal values.
 These checks are evidence checks, not matching or reconciliation. Persistence,
 deduplication, fuzzy matching, and source parsing belong to later layers.
 
+## External student identity resolution
+
+`ExternalStudentIdentity` is the only stable student lookup key: the tuple
+`source + context + source_student_id`. It is intentionally not globally unique.
+`ExternalIdentityResolver` accepts an `ImportCandidate` and a read-only lookup;
+it returns `existing`, `new`, `conflict`, or `rejected` outcomes without writing
+SQLite or creating `Course`/`Edition` records. Names and email addresses are
+descriptive evidence only and are never used for matching. Missing editions and
+incomplete identities are rejected with short, non-sensitive diagnostics.
+
+`action` and `group` are optional nullable candidate metadata. They are carried
+through resolution but do not affect identity matching.
+
 ## Candidate values and warning codes
 
 `ImportCandidate.values` is an escape hatch for normalized, application-owned
