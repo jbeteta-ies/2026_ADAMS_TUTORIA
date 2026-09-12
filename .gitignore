@@ -67,9 +67,14 @@ db.sqlite3-journal
 data/
 data/private/
 data/local/
+data/raw/
+data/processed/
 *.db
 *.sqlite
 *.sqlite3
+*.bak
+*.backup
+*.dump
 *.db-journal
 *.db-shm
 *.db-wal
