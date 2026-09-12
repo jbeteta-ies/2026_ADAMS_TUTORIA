@@ -15,6 +15,7 @@ from uuid import UUID
 from adams_tutoria.import_contract import (
     EditionEvidence,
     EnrollmentEvidence,
+    ExternalStudentIdentity,
     ImportCandidate,
     ImportEntity,
     ImportResult,
@@ -49,6 +50,11 @@ class AdamsStudentEnrollmentMapping:
     edition_label: str | None = None
     course_reference: str | None = None
     full_name_strategy: FullNameStrategy = FullNameStrategy.DIRECT
+    external_source: str | None = None
+    external_context: str | None = None
+    source_student_id: str | None = None
+    action: str | None = None
+    group: str | None = None
 
     def __post_init__(self) -> None:
         columns = (
@@ -59,11 +65,19 @@ class AdamsStudentEnrollmentMapping:
             self.edition_reference,
             self.edition_label,
             self.course_reference,
+            self.external_source,
+            self.external_context,
+            self.source_student_id,
         )
         if any(column is not None and not column.strip() for column in columns):
             raise ValueError("mapped column names must not be blank")
         if not isinstance(self.full_name_strategy, FullNameStrategy):
             raise ValueError("unsupported full-name strategy")
+        identity_fields = (self.external_source, self.external_context, self.source_student_id)
+        if any(field is not None for field in identity_fields) and not all(identity_fields):
+            raise ValueError(
+                "external identity mapping must define source, context, and student id"
+            )
         if self.edition_reference is None and self.edition_label is None:
             raise ValueError("edition_reference or edition_label is required")
 
@@ -110,6 +124,7 @@ class AdamsStudentEnrollmentAdapter:
             reference=self._reference(row, self.mapping.student_reference),
             name=self._text(row, self.mapping.full_name),
             email=self._text(row, self.mapping.email),
+            external_identity=self._identity(row),
         )
         edition = EditionEvidence(
             edition_reference=self._reference(row, self.mapping.edition_reference),
@@ -125,7 +140,26 @@ class AdamsStudentEnrollmentAdapter:
             ImportEntity.ENROLLMENT,
             provenance,
             enrollment=enrollment,
+            action=self.mapping.action,
+            group=self.mapping.group,
         )
+
+    def _identity(self, row: Row) -> ExternalStudentIdentity | None:
+        mapping = self.mapping
+        if (
+            mapping.external_source is None
+            and mapping.external_context is None
+            and mapping.source_student_id is None
+        ):
+            return None
+        if not all((mapping.external_source, mapping.external_context, mapping.source_student_id)):
+            raise ValueError("external identity mapping is incomplete")
+        source = self._text(row, mapping.external_source)
+        context = self._text(row, mapping.external_context)
+        source_id = self._text(row, mapping.source_student_id)
+        if source is None or context is None or source_id is None:
+            return None
+        return ExternalStudentIdentity(source, context, source_id)
 
     @staticmethod
     def _text(row: Row, column: str | None) -> str | None:

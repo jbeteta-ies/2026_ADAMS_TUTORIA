@@ -77,3 +77,39 @@ def test_csv_reader_to_tabular_row_to_adapter(tmp_path: Path) -> None:
 
     assert len(result.accepted) == 1
     assert result.accepted[0].provenance.source_name == "synthetic.csv"
+
+
+def test_adapter_maps_external_identity_and_action_group() -> None:
+    adapter = AdamsStudentEnrollmentAdapter(
+        AdamsStudentEnrollmentMapping(
+            full_name="name",
+            edition_label="edition",
+            external_source="source",
+            external_context="context",
+            source_student_id="student_id",
+            action="review",
+            group="cohort-a",
+        )
+    )
+    result = adapter.adapt(
+        [
+            {
+                "name": "Synthetic Student",
+                "edition": "Synthetic Edition",
+                "source": "system-a",
+                "context": "edition-1",
+                "student_id": "S-8",
+            }
+        ]
+    )
+    candidate = result.accepted[0]
+    assert candidate.action == "review"
+    assert candidate.group == "cohort-a"
+    assert candidate.enrollment is not None
+    assert candidate.enrollment.student is not None
+    assert candidate.enrollment.student.external_identity is not None
+    assert candidate.enrollment.student.external_identity.key == (
+        "system-a",
+        "edition-1",
+        "S-8",
+    )
