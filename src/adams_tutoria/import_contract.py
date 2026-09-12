@@ -7,6 +7,28 @@ from typing import Protocol, TypeVar
 from uuid import UUID
 
 
+@dataclass(frozen=True, slots=True)
+class ExternalStudentIdentity:
+    """Stable student identity scoped by source and context."""
+
+    source: str
+    context: str
+    source_student_id: str
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("source", self.source),
+            ("context", self.context),
+            ("source_student_id", self.source_student_id),
+        ):
+            if not value.strip():
+                raise ValueError(f"{name} must not be blank")
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return (self.source, self.context, self.source_student_id)
+
+
 class ImportEntity(StrEnum):
     STUDENT = "student"
     EDITION = "edition"
@@ -56,11 +78,14 @@ class StudentEvidence:
     reference: ResolutionReference | None = None
     name: str | None = None
     email: str | None = None
+    external_identity: ExternalStudentIdentity | None = None
 
     @property
     def has_evidence(self) -> bool:
-        return (self.reference is not None and self.reference.has_evidence) or any(
-            value is not None and bool(value.strip()) for value in (self.name, self.email)
+        return (
+            self.external_identity is not None
+            or (self.reference is not None and self.reference.has_evidence)
+            or any(value is not None and bool(value.strip()) for value in (self.name, self.email))
         )
 
 
@@ -114,10 +139,15 @@ class ImportCandidate:
     edition: EditionEvidence | None = None
     enrollment: EnrollmentEvidence | None = None
     values: tuple[tuple[str, str], ...] = ()
+    action: str | None = None
+    group: str | None = None
 
     def __post_init__(self) -> None:
         if any(not key.strip() or not value.strip() for key, value in self.values):
             raise ValueError("candidate value keys and values must not be blank")
+        for field_name, value in (("action", self.action), ("group", self.group)):
+            if value is not None and not value.strip():
+                raise ValueError(f"{field_name} must be non-blank or None")
         if self.entity is ImportEntity.STUDENT and (
             self.student is None or not self.student.has_evidence
         ):
