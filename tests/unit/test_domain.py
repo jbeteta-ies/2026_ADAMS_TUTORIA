@@ -402,13 +402,22 @@ def test_evaluation_optional_labels_and_external_id_preserve_values_and_none() -
 @pytest.mark.parametrize("field_name", ["target_label", "external_id"])
 def test_evaluation_rejects_blank_optional_text(field_name: str) -> None:
     with pytest.raises(ValueError, match=field_name):
-        Evaluation(
-            uuid4(),
-            _enrollment(),
-            EvaluationTargetType.MODULE,
-            "synthetic-module-10",
-            **{field_name: "  "},
-        )
+        if field_name == "target_label":
+            Evaluation(
+                uuid4(),
+                _enrollment(),
+                EvaluationTargetType.MODULE,
+                "synthetic-module-10",
+                target_label="  ",
+            )
+        else:
+            Evaluation(
+                uuid4(),
+                _enrollment(),
+                EvaluationTargetType.MODULE,
+                "synthetic-module-10",
+                external_id="  ",
+            )
 
 
 def test_communication_record_stores_enrollment_and_lifecycle_data() -> None:
