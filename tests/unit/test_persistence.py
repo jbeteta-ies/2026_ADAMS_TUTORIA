@@ -20,6 +20,10 @@ from adams_tutoria.domain import (
     Evaluation,
     EvaluationStatus,
     EvaluationTargetType,
+    ImportBatch,
+    ImportBatchChange,
+    ImportBatchStatus,
+    ImportSourceType,
     ProgressSnapshot,
     Student,
     TutorAction,
@@ -31,6 +35,8 @@ from adams_tutoria.persistence.repositories import (
     EditionRepository,
     EnrollmentRepository,
     EvaluationRepository,
+    ImportBatchChangeRepository,
+    ImportBatchRepository,
     ProgressSnapshotRepository,
     StudentRepository,
     TutorActionRepository,
@@ -72,6 +78,8 @@ def test_initialization_is_idempotent_and_has_all_tables(tmp_path: Path) -> None
             "evaluation",
             "communication_record",
             "tutor_action",
+            "import_batch",
+            "import_batch_change",
         }
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
@@ -245,3 +253,63 @@ def test_tutor_actions_round_trip_does_not_leak_between_enrollments(tmp_path: Pa
 
     assert repository.list_for_enrollment(enrollment.id) == (first,)
     assert repository.list_for_enrollment(other.id) == (second,)
+
+
+def test_import_batch_round_trip_and_safe_change_diagnostics(tmp_path: Path) -> None:
+    path = tmp_path / "imports.sqlite3"
+    initialize_database(path)
+    batch = ImportBatch(
+        uuid4(),
+        ImportSourceType.EXCEL,
+        "synthetic-report.xlsx",
+        datetime(2026, 3, 1, 10, tzinfo=UTC),
+        source_reference="local-ref",
+        source_fingerprint="a" * 64,
+        context="edition-x",
+        action="upsert",
+        total_count=3,
+        accepted_count=2,
+        rejected_count=1,
+        warning_count=1,
+    )
+    batches = ImportBatchRepository(path)
+    batches.save(batch)
+    assert batches.get(batch.id) == batch
+    batches.transition(batch.id, ImportBatchStatus.CONFIRMED, datetime(2026, 3, 1, 11, tzinfo=UTC))
+    batches.transition(batch.id, ImportBatchStatus.APPLIED, datetime(2026, 3, 1, 12, tzinfo=UTC))
+    applied = batches.get(batch.id)
+    assert applied is not None and applied.status is ImportBatchStatus.APPLIED
+    change = ImportBatchChange(
+        uuid4(),
+        batch.id,
+        "enrollment",
+        "rejected",
+        source_row_number=4,
+        source_identifier="row-4",
+        diagnostic_code="missing_evidence",
+        diagnostic_message="Required evidence missing",
+    )
+    changes = ImportBatchChangeRepository(path)
+    changes.save(change)
+    assert changes.list_for_batch(batch.id) == (change,)
+    with connection(path) as db:
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(import_batch)")}
+        assert (
+            "source_name" in columns and "raw_row" not in columns and "source_file" not in columns
+        )
+
+
+def test_import_batch_transition_rejects_invalid_and_naive_values(tmp_path: Path) -> None:
+    path = tmp_path / "import-transitions.sqlite3"
+    initialize_database(path)
+    batch = ImportBatch(
+        uuid4(), ImportSourceType.MANUAL, "synthetic", datetime(2026, 3, 1, tzinfo=UTC)
+    )
+    repository = ImportBatchRepository(path)
+    repository.save(batch)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        repository.transition(batch.id, ImportBatchStatus.CONFIRMED, datetime(2026, 3, 1, 1))
+    with pytest.raises(ValueError, match="invalid import transition"):
+        repository.transition(
+            batch.id, ImportBatchStatus.APPLIED, datetime(2026, 3, 1, 1, tzinfo=UTC)
+        )

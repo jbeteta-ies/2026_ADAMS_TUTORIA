@@ -55,6 +55,15 @@ source- or adapter-specific non-fatal conditions without requiring a central
 enum change for every new integration. Codes must still be non-blank and
 stable enough for logs and tests; messages provide human-readable context.
 
+## Import batches and provenance
+
+`ImportBatch` records one execution using safe metadata, timezone-aware dates,
+counters, and a lifecycle status. The source file and raw rows are never
+persisted. Statuses are `pending`, `confirmed`, `applied`, `rejected`, and
+`failed`; only pending/confirmed may advance and terminal statuses cannot
+transition again. `ImportBatchChange` stores compact audit or diagnostic data
+linked to a batch, without raw rows or unnecessary PII.
+
 ## Adding an adapter
 
 Implement `ImportAdapter.adapt`. Keep source-specific columns and parsing
