@@ -7,7 +7,8 @@ imports, ADAMS integrations, and operational data belong to future Issues.
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-from uuid import uuid4
+from pathlib import Path
+from uuid import UUID, uuid4, uuid5
 
 import streamlit as st
 
@@ -17,9 +18,16 @@ from adams_tutoria.attention import (
     prioritize_attention,
 )
 from adams_tutoria.config import default_config
+from adams_tutoria.content_search import MarkdownIndex
 from adams_tutoria.demo_profile import demo_profile
 from adams_tutoria.demo_summary import demo_edition_id, demo_enrollment_summaries
-from adams_tutoria.domain import CommunicationStatus, TutorAction
+from adams_tutoria.domain import (
+    CommunicationStatus,
+    ContentSource,
+    ContentSourceType,
+    Course,
+    TutorAction,
+)
 from adams_tutoria.message_templates import MessageContext, render_message
 from adams_tutoria.persistence.database import database_path, initialize_database
 from adams_tutoria.persistence.repositories import (
@@ -30,6 +38,7 @@ from adams_tutoria.persistence.repositories import (
     StudentRepository,
     TutorActionRepository,
 )
+from adams_tutoria.question_assistant import QuestionAssistant
 from adams_tutoria.student_tracking import (
     filter_tracking_rows,
     prepare_tracking_rows,
@@ -137,6 +146,7 @@ def _render_page(course: CourseOption, edition: EditionOption, page: str) -> Non
             "Los datos mostrados son sintéticos. "
             "Las fuentes operativas se añadirán en futuras Issues."
         )
+        _render_question_assistant(course)
     elif page == "Curso":
         st.title("Curso")
         st.subheader(course.name)
@@ -247,6 +257,37 @@ def _render_page(course: CourseOption, edition: EditionOption, page: str) -> Non
                 _render_student_profile(detail.row.enrollment_id)
         else:
             st.info("No hay matrículas que coincidan con los filtros.")
+
+
+def _assistant_course(option: CourseOption) -> Course:
+    """Build a synthetic course reference for the dashboard demo."""
+    content_root = Path(__file__).with_name("demo_question_content") / option.id
+    return Course(
+        uuid5(UUID("00000000-0000-0000-0000-000000000029"), option.id),
+        option.name,
+        code=option.code,
+        content_source=ContentSource(ContentSourceType.LOCAL_PATH, str(content_root)),
+    )
+
+
+def _render_question_assistant(option: CourseOption) -> None:
+    """Render a local, human-reviewed question-answer draft."""
+    st.subheader("Asistente de apoyo para dudas")
+    st.caption("Borrador sintético basado solo en el contenido del curso seleccionado.")
+    question = st.text_input("Duda", key="question_assistant_input")
+    if st.button("Preparar borrador", key="question_assistant_submit"):
+        if not question.strip():
+            st.warning("Escribe una duda antes de preparar el borrador.")
+            return
+        index = MarkdownIndex()
+        selected_course = _assistant_course(option)
+        index.index_course(selected_course)
+        draft = QuestionAssistant(index).draft(selected_course, question)
+        st.text_area("Borrador (revisión manual)", draft.text, height=180)
+        st.write("**Referencias**")
+        for reference in draft.references:
+            st.caption(f"{reference.path} · {reference.module}/{reference.document}")
+            st.code(reference.fragment)
 
 
 def _render_student_profile(enrollment_id) -> None:
