@@ -42,6 +42,20 @@ CREATE TABLE IF NOT EXISTS tutor_action (
     id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
     occurred_at TEXT NOT NULL, action TEXT NOT NULL, note TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS import_batch (
+    id TEXT PRIMARY KEY, source_type TEXT NOT NULL, source_name TEXT NOT NULL,
+    started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL,
+    source_reference TEXT, source_fingerprint TEXT, context TEXT, action TEXT, group_name TEXT,
+    total_count INTEGER NOT NULL DEFAULT 0, accepted_count INTEGER NOT NULL DEFAULT 0,
+    rejected_count INTEGER NOT NULL DEFAULT 0, warning_count INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS import_batch_change (
+    id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES import_batch(id),
+    entity_type TEXT NOT NULL, change_type TEXT NOT NULL, entity_id TEXT,
+    source_row_number INTEGER, source_identifier TEXT, diagnostic_code TEXT,
+    diagnostic_message TEXT
+);
 """
 
 COURSE_ADDITIONS = {

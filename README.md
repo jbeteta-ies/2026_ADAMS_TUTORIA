@@ -204,6 +204,14 @@ review is required and sending remains manual copy/paste into ADAMS. These
 boundaries prepare the model for future Issues #18–#21 (recommendation,
 deduplication, generation, and manual workflow) without implementing them now.
 
+### Import batches
+
+Import execution metadata is persisted as `ImportBatch` and
+`ImportBatchChange`. Only safe provenance, counters, statuses, timestamps, and
+compact diagnostics are stored; complete files, raw rows, and unnecessary PII
+remain outside the database. Excel parsing, diffs, logical deletion, UI, OCR,
+and ADAMS connectors are intentionally out of scope.
+
 ### Import contract
 
 The source-independent import boundary is documented in

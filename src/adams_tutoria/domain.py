@@ -154,6 +154,110 @@ class CommunicationStatus(Enum):
     SENT = "sent"
 
 
+class ImportSourceType(Enum):
+    """Generic kinds of input; parsing connectors are intentionally separate."""
+
+    EXCEL = "excel"
+    CSV = "csv"
+    API = "api"
+    MANUAL = "manual"
+    OTHER = "other"
+
+
+class ImportBatchStatus(Enum):
+    """Lifecycle of an import execution, from review to application."""
+
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    APPLIED = "applied"
+    REJECTED = "rejected"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class ImportBatch:
+    """Safe, source-independent metadata for one import execution.
+
+    The source is represented by metadata and an optional digest, never by the
+    source file, raw rows, or copied personal data.
+    """
+
+    id: UUID
+    source_type: ImportSourceType
+    source_name: str
+    started_at: datetime
+    status: ImportBatchStatus = ImportBatchStatus.PENDING
+    finished_at: datetime | None = None
+    source_reference: str | None = None
+    source_fingerprint: str | None = None
+    context: str | None = None
+    action: str | None = None
+    group: str | None = None
+    total_count: int = 0
+    accepted_count: int = 0
+    rejected_count: int = 0
+    warning_count: int = 0
+    error_count: int = 0
+
+    def __post_init__(self) -> None:
+        _require_non_blank(self.source_name, "source_name")
+        _require_aware(self.started_at, "started_at")
+        if self.finished_at is not None:
+            _require_aware(self.finished_at, "finished_at")
+            if self.finished_at < self.started_at:
+                raise ValueError("finished_at must not be before started_at")
+        for name, value in (
+            ("source_reference", self.source_reference),
+            ("context", self.context),
+            ("action", self.action),
+            ("group", self.group),
+            ("source_fingerprint", self.source_fingerprint),
+        ):
+            if value is not None and not value.strip():
+                raise ValueError(f"{name} must be non-blank or None")
+        if self.source_fingerprint is not None and len(self.source_fingerprint) != 64:
+            raise ValueError("source_fingerprint must be a SHA-256 hex digest")
+        counts = (
+            self.total_count,
+            self.accepted_count,
+            self.rejected_count,
+            self.warning_count,
+            self.error_count,
+        )
+        if any(count < 0 for count in counts):
+            raise ValueError("import counters must not be negative")
+        if self.accepted_count + self.rejected_count > self.total_count:
+            raise ValueError("accepted and rejected counts exceed total_count")
+
+
+@dataclass(frozen=True)
+class ImportBatchChange:
+    """A privacy-safe audit entry associated with an :class:`ImportBatch`."""
+
+    id: UUID
+    batch_id: UUID
+    entity_type: str
+    change_type: str
+    entity_id: UUID | None = None
+    source_row_number: int | None = None
+    source_identifier: str | None = None
+    diagnostic_code: str | None = None
+    diagnostic_message: str | None = None
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("entity_type", self.entity_type),
+            ("change_type", self.change_type),
+            ("source_identifier", self.source_identifier),
+            ("diagnostic_code", self.diagnostic_code),
+            ("diagnostic_message", self.diagnostic_message),
+        ):
+            if value is not None and not value.strip():
+                raise ValueError(f"{name} must be non-blank or None")
+        if self.source_row_number is not None and self.source_row_number < 1:
+            raise ValueError("source_row_number must be positive")
+
+
 @dataclass(frozen=True)
 class TutorAction:
     """An action recorded by a tutor, linked only to an enrollment."""
