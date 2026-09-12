@@ -22,3 +22,17 @@ espacios repetidos, y exige que todos los términos aparezcan en el documento.
 No hay índice persistente, embeddings, UI, clonado, sincronización,
 autenticación ni dependencias nuevas. Los contenidos operativos deben
 permanecer fuera del repositorio; las pruebas usan Markdown sintético.
+
+## Asistente de apoyo
+
+`adams_tutoria.question_assistant.QuestionAssistant` reutiliza un
+`MarkdownIndex` ya cargado para preparar un borrador determinista a partir de
+una duda del tutor. El borrador solo incluye fragmentos que aparecen en el
+curso recibido y cada fragmento conserva `module`, `document` y `path` como
+referencia trazable. Si no hay coincidencias, lo indica explícitamente en vez
+de inventar una respuesta.
+
+El asistente no llama a ADAMS, no persiste el borrador y no envía mensajes. La
+interfaz del dashboard solo lo muestra para revisión manual. El curso debe
+indexarse explícitamente antes de usarlo; por tanto, varios cursos no se
+mezclan accidentalmente.

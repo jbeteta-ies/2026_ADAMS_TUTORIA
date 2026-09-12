@@ -38,6 +38,21 @@ def test_edition_page_shows_exactly_six_metrics_and_values() -> None:
     assert [metric.value for metric in app.metric] == ["2", "1", "1", "2", "0", "2"]
 
 
+def test_question_assistant_shows_manual_draft_and_reference() -> None:
+    """The dashboard exposes a synthetic, traceable draft without sending it."""
+
+    from streamlit.testing.v1 import AppTest
+
+    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
+    app = AppTest.from_file(dashboard_path).run()
+    app.text_input[0].set_value("planificación tareas")
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert any(widget.label == "Borrador (revisión manual)" for widget in app.text_area)
+    assert any("tema-uno.md" in widget.value for widget in app.caption)
+
+
 def test_changing_edition_is_isolated() -> None:
     """Changing the selector recomputes only the selected synthetic edition."""
 
