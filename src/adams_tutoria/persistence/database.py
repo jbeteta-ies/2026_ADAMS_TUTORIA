@@ -62,3 +62,7 @@ def initialize_database(path: Path) -> None:
             "CREATE INDEX IF NOT EXISTS idx_tutor_action_enrollment_time "
             "ON tutor_action(enrollment_id, occurred_at)"
         )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_import_batch_change_batch "
+            "ON import_batch_change(batch_id, id)"
+        )
