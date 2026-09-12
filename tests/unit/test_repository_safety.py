@@ -23,6 +23,11 @@ def test_operational_paths_are_ignored() -> None:
         "local.sqlite3-wal",
         ".env",
         ".env.local",
+        "data/raw/adams-export.csv",
+        "data/processed/generated-communication.txt",
+        "data/private/adams_tutoria.sqlite3.bak",
+        "data/local/adams_tutoria.sqlite3.backup",
+        "data/local/adams_tutoria.sqlite3.dump",
     )
 
     for path in paths:
@@ -41,3 +46,39 @@ def test_repository_safety_documentation_exists() -> None:
     assert "Operational data must stay local" in readme
     assert "synthetic data only" in readme
     assert "no environment variables" in readme
+
+
+def test_privacy_audit_documentation_covers_required_surfaces() -> None:
+    """Keep the repository audit available alongside the implementation."""
+    document = (ROOT / "docs" / "privacy-security-retention.md").read_text(encoding="utf-8")
+
+    for required_section in (
+        "Rutas y configuración",
+        "SQLite",
+        "Imports y exports",
+        "Comunicaciones",
+        "Logs y errores",
+        "Backups",
+        "Fixtures",
+        "Retención",
+    ):
+        assert required_section in document
+
+
+def test_tracked_fixture_files_are_explicitly_synthetic() -> None:
+    """Tracked fixtures, when added, must identify themselves as synthetic."""
+    fixtures = ROOT / "tests" / "fixtures"
+    if not fixtures.exists():
+        return
+
+    for path in fixtures.rglob("*"):
+        if path.is_file() and path.suffix.lower() in {
+            ".csv",
+            ".json",
+            ".md",
+            ".txt",
+            ".yaml",
+            ".yml",
+        }:
+            content = path.read_text(encoding="utf-8")
+            assert "synthetic" in content.lower(), f"Fixture is not marked synthetic: {path}"
