@@ -19,6 +19,10 @@ from adams_tutoria.domain import (
     Evaluation,
     EvaluationStatus,
     EvaluationTargetType,
+    ImportBatch,
+    ImportBatchChange,
+    ImportBatchStatus,
+    ImportSourceType,
     ProgressSnapshot,
     Student,
     TutorAction,
@@ -330,6 +334,177 @@ class TutorActionRepository(_Repository):
                 for row in db.execute(
                     "SELECT id FROM tutor_action WHERE enrollment_id = ? ORDER BY occurred_at, id",
                     (str(enrollment_id),),
+                )
+            ]
+        return tuple(record for record_id in ids if (record := self.get(record_id)) is not None)
+
+
+class ImportBatchRepository(_Repository):
+    """Explicit repository for safe import execution metadata."""
+
+    table = "import_batch"
+
+    _allowed = {
+        ImportBatchStatus.PENDING: {
+            ImportBatchStatus.CONFIRMED,
+            ImportBatchStatus.REJECTED,
+            ImportBatchStatus.FAILED,
+        },
+        ImportBatchStatus.CONFIRMED: {
+            ImportBatchStatus.APPLIED,
+            ImportBatchStatus.REJECTED,
+            ImportBatchStatus.FAILED,
+        },
+        ImportBatchStatus.APPLIED: set(),
+        ImportBatchStatus.REJECTED: set(),
+        ImportBatchStatus.FAILED: set(),
+    }
+
+    def save(self, value: ImportBatch) -> None:
+        with connection(self.path) as db:
+            db.execute(
+                """INSERT INTO import_batch
+                (id,source_type,source_name,started_at,finished_at,status,source_reference,
+                 source_fingerprint,context,action,group_name,total_count,accepted_count,
+                 rejected_count,warning_count,error_count) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET source_type=excluded.source_type,
+                source_name=excluded.source_name,started_at=excluded.started_at,finished_at=excluded.finished_at,
+                status=excluded.status,source_reference=excluded.source_reference,
+                source_fingerprint=excluded.source_fingerprint,context=excluded.context,action=excluded.action,
+                group_name=excluded.group_name,total_count=excluded.total_count,accepted_count=excluded.accepted_count,
+                rejected_count=excluded.rejected_count,warning_count=excluded.warning_count,error_count=excluded.error_count""",
+                (
+                    to_db(value.id),
+                    to_db(value.source_type),
+                    value.source_name,
+                    to_db(value.started_at),
+                    to_db(value.finished_at),
+                    to_db(value.status),
+                    value.source_reference,
+                    value.source_fingerprint,
+                    value.context,
+                    value.action,
+                    value.group,
+                    value.total_count,
+                    value.accepted_count,
+                    value.rejected_count,
+                    value.warning_count,
+                    value.error_count,
+                ),
+            )
+
+    def get(self, record_id: UUID) -> ImportBatch | None:
+        row = self._row(record_id)
+        return (
+            None
+            if row is None
+            else ImportBatch(
+                UUID(row["id"]),
+                ImportSourceType(row["source_type"]),
+                row["source_name"],
+                datetime.fromisoformat(row["started_at"]),
+                ImportBatchStatus(row["status"]),
+                from_datetime(row["finished_at"]),
+                row["source_reference"],
+                row["source_fingerprint"],
+                row["context"],
+                row["action"],
+                row["group_name"],
+                row["total_count"],
+                row["accepted_count"],
+                row["rejected_count"],
+                row["warning_count"],
+                row["error_count"],
+            )
+        )
+
+    def transition(self, record_id: UUID, status: ImportBatchStatus, occurred_at: datetime) -> None:
+        record = self.get(record_id)
+        if record is None:
+            raise KeyError(record_id)
+        if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+            raise ValueError("occurred_at must be timezone-aware")
+        if status not in self._allowed[record.status]:
+            raise ValueError(f"invalid import transition: {record.status.value} -> {status.value}")
+        if occurred_at < record.started_at:
+            raise ValueError("transition timestamp must not be before started_at")
+        self.save(
+            ImportBatch(
+                record.id,
+                record.source_type,
+                record.source_name,
+                record.started_at,
+                status,
+                occurred_at
+                if status
+                in (ImportBatchStatus.APPLIED, ImportBatchStatus.REJECTED, ImportBatchStatus.FAILED)
+                else record.finished_at,
+                record.source_reference,
+                record.source_fingerprint,
+                record.context,
+                record.action,
+                record.group,
+                record.total_count,
+                record.accepted_count,
+                record.rejected_count,
+                record.warning_count,
+                record.error_count,
+            )
+        )
+
+
+class ImportBatchChangeRepository(_Repository):
+    table = "import_batch_change"
+
+    def save(self, value: ImportBatchChange) -> None:
+        with connection(self.path) as db:
+            db.execute(
+                """INSERT INTO import_batch_change
+                (id,batch_id,entity_type,change_type,entity_id,source_row_number,source_identifier,
+                 diagnostic_code,diagnostic_message) VALUES(?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET batch_id=excluded.batch_id,
+                entity_type=excluded.entity_type,
+                change_type=excluded.change_type,entity_id=excluded.entity_id,source_row_number=excluded.source_row_number,
+                source_identifier=excluded.source_identifier,diagnostic_code=excluded.diagnostic_code,
+                diagnostic_message=excluded.diagnostic_message""",
+                (
+                    to_db(value.id),
+                    to_db(value.batch_id),
+                    value.entity_type,
+                    value.change_type,
+                    to_db(value.entity_id),
+                    value.source_row_number,
+                    value.source_identifier,
+                    value.diagnostic_code,
+                    value.diagnostic_message,
+                ),
+            )
+
+    def get(self, record_id: UUID) -> ImportBatchChange | None:
+        row = self._row(record_id)
+        return (
+            None
+            if row is None
+            else ImportBatchChange(
+                UUID(row["id"]),
+                UUID(row["batch_id"]),
+                row["entity_type"],
+                row["change_type"],
+                UUID(row["entity_id"]) if row["entity_id"] else None,
+                row["source_row_number"],
+                row["source_identifier"],
+                row["diagnostic_code"],
+                row["diagnostic_message"],
+            )
+        )
+
+    def list_for_batch(self, batch_id: UUID) -> tuple[ImportBatchChange, ...]:
+        with connection(self.path) as db:
+            ids = [
+                UUID(row["id"])
+                for row in db.execute(
+                    "SELECT id FROM import_batch_change WHERE batch_id = ? ORDER BY id",
+                    (str(batch_id),),
                 )
             ]
         return tuple(record for record_id in ids if (record := self.get(record_id)) is not None)
