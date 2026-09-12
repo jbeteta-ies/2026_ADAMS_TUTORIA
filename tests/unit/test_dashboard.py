@@ -101,7 +101,9 @@ def test_message_requires_approval_before_it_is_visible(tmp_path, monkeypatch) -
     approve.click().run()
     messages = [widget for widget in app.text_area if widget.label.startswith("Mensaje")]
     assert len(messages) == 1
-    assert "Alumno sintético" in messages[0].value
+    message = messages[0].value
+    assert message is not None
+    assert "Alumno sintético" in message
     assert any(button.label.startswith("Registrar COPIED") for button in app.button)
     assert any(button.label.startswith("Descargar mensaje") for button in app.download_button)
 
