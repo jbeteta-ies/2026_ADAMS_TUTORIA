@@ -17,6 +17,10 @@ This creates a local virtual environment (`.venv/`) and installs dependencies.
 
 ## Run
 
+For the complete local installation and operation procedure, including the
+dashboard, generic imports, manual communications, local data, backups, and
+known limitations, see [`docs/installation-and-operation.md`](docs/installation-and-operation.md).
+
 Preferred:
 
 ```bash
