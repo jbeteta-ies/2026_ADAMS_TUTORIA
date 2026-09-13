@@ -366,13 +366,16 @@ class ImportBatchRepository(_Repository):
                 """INSERT INTO import_batch
                 (id,source_type,source_name,started_at,finished_at,status,source_reference,
                  source_fingerprint,context,action,group_name,total_count,accepted_count,
-                 rejected_count,warning_count,error_count) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 rejected_count,warning_count,error_count,scope_type,scope_reference,idempotency_key)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET source_type=excluded.source_type,
                 source_name=excluded.source_name,started_at=excluded.started_at,finished_at=excluded.finished_at,
                 status=excluded.status,source_reference=excluded.source_reference,
                 source_fingerprint=excluded.source_fingerprint,context=excluded.context,action=excluded.action,
                 group_name=excluded.group_name,total_count=excluded.total_count,accepted_count=excluded.accepted_count,
-                rejected_count=excluded.rejected_count,warning_count=excluded.warning_count,error_count=excluded.error_count""",
+                 rejected_count=excluded.rejected_count,warning_count=excluded.warning_count,
+                 error_count=excluded.error_count,scope_type=excluded.scope_type,
+                 scope_reference=excluded.scope_reference,idempotency_key=excluded.idempotency_key""",
                 (
                     to_db(value.id),
                     to_db(value.source_type),
@@ -390,6 +393,9 @@ class ImportBatchRepository(_Repository):
                     value.rejected_count,
                     value.warning_count,
                     value.error_count,
+                    value.scope_type,
+                    value.scope_reference,
+                    value.idempotency_key,
                 ),
             )
 
@@ -415,6 +421,9 @@ class ImportBatchRepository(_Repository):
                 row["rejected_count"],
                 row["warning_count"],
                 row["error_count"],
+                row["scope_type"] if "scope_type" in tuple(row.keys()) else "partial",
+                row["scope_reference"] if "scope_reference" in tuple(row.keys()) else None,
+                row["idempotency_key"] if "idempotency_key" in tuple(row.keys()) else None,
             )
         )
 
@@ -449,6 +458,9 @@ class ImportBatchRepository(_Repository):
                 record.rejected_count,
                 record.warning_count,
                 record.error_count,
+                record.scope_type,
+                record.scope_reference,
+                record.idempotency_key,
             )
         )
 
