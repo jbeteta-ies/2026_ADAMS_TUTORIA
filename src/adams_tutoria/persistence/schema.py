@@ -56,6 +56,32 @@ CREATE TABLE IF NOT EXISTS import_batch_change (
     source_row_number INTEGER, source_identifier TEXT, diagnostic_code TEXT,
     diagnostic_message TEXT
 );
+CREATE TABLE IF NOT EXISTS student_external_identity (
+    source TEXT NOT NULL, context TEXT NOT NULL, source_student_id TEXT NOT NULL,
+    student_id TEXT NOT NULL REFERENCES student(id),
+    PRIMARY KEY (source, context, source_student_id)
+);
+CREATE TABLE IF NOT EXISTS enrollment_external_identity (
+    source TEXT NOT NULL, context TEXT NOT NULL, source_enrollment_id TEXT NOT NULL,
+    edition_id TEXT NOT NULL REFERENCES edition(id),
+    enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
+    PRIMARY KEY (source, context, source_enrollment_id, edition_id)
+);
+CREATE TABLE IF NOT EXISTS enrollment_state (
+    enrollment_id TEXT PRIMARY KEY REFERENCES enrollment(id), active INTEGER NOT NULL,
+    changed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS student_history (
+    id TEXT PRIMARY KEY, student_id TEXT NOT NULL REFERENCES student(id),
+    batch_id TEXT NOT NULL REFERENCES import_batch(id),
+    event_type TEXT NOT NULL, full_name TEXT, email TEXT, occurred_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS enrollment_history (
+    id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
+    batch_id TEXT NOT NULL REFERENCES import_batch(id),
+    event_type TEXT NOT NULL, active INTEGER NOT NULL, external_id TEXT,
+    occurred_at TEXT NOT NULL
+);
 """
 
 COURSE_ADDITIONS = {
@@ -71,4 +97,10 @@ COMMUNICATION_RECORD_ADDITIONS = {
     "edition_id": "TEXT",
     "postponed_at": "TEXT",
     "copied_at": "TEXT",
+}
+
+IMPORT_BATCH_ADDITIONS = {
+    "scope_type": "TEXT NOT NULL DEFAULT 'partial'",
+    "scope_reference": "TEXT",
+    "idempotency_key": "TEXT",
 }

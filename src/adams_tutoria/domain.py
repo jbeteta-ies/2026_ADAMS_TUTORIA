@@ -198,6 +198,9 @@ class ImportBatch:
     rejected_count: int = 0
     warning_count: int = 0
     error_count: int = 0
+    scope_type: str = "partial"
+    scope_reference: str | None = None
+    idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         _require_non_blank(self.source_name, "source_name")
@@ -217,6 +220,14 @@ class ImportBatch:
                 raise ValueError(f"{name} must be non-blank or None")
         if self.source_fingerprint is not None and len(self.source_fingerprint) != 64:
             raise ValueError("source_fingerprint must be a SHA-256 hex digest")
+        if self.scope_type not in ("full", "partial"):
+            raise ValueError("scope_type must be full or partial")
+        for name, value in (
+            ("scope_reference", self.scope_reference),
+            ("idempotency_key", self.idempotency_key),
+        ):
+            if value is not None and not value.strip():
+                raise ValueError(f"{name} must be non-blank or None")
         counts = (
             self.total_count,
             self.accepted_count,
