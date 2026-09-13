@@ -80,6 +80,11 @@ def test_initialization_is_idempotent_and_has_all_tables(tmp_path: Path) -> None
             "tutor_action",
             "import_batch",
             "import_batch_change",
+            "student_external_identity",
+            "enrollment_external_identity",
+            "enrollment_state",
+            "student_history",
+            "enrollment_history",
         }
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 

@@ -209,8 +209,10 @@ deduplication, generation, and manual workflow) without implementing them now.
 Import execution metadata is persisted as `ImportBatch` and
 `ImportBatchChange`. Only safe provenance, counters, statuses, timestamps, and
 compact diagnostics are stored; complete files, raw rows, and unnecessary PII
-remain outside the database. Excel parsing, diffs, logical deletion, UI, OCR,
-and ADAMS connectors are intentionally out of scope.
+remain outside the database. Enrollment upserts, logical deactivation, explicit
+reactivation, and append-only lifecycle history are implemented; see
+[`docs/enrollment-lifecycle.md`](docs/enrollment-lifecycle.md). Excel parsing,
+UI, OCR, and ADAMS connectors are intentionally out of scope.
 
 ### Import contract
 

@@ -7,7 +7,12 @@ from pathlib import Path
 
 from adams_tutoria.config import AppConfig
 
-from .schema import COMMUNICATION_RECORD_ADDITIONS, COURSE_ADDITIONS, SCHEMA
+from .schema import (
+    COMMUNICATION_RECORD_ADDITIONS,
+    COURSE_ADDITIONS,
+    IMPORT_BATCH_ADDITIONS,
+    SCHEMA,
+)
 
 DATABASE_FILENAME = "adams_tutoria.sqlite3"
 
@@ -65,4 +70,16 @@ def initialize_database(path: Path) -> None:
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_import_batch_change_batch "
             "ON import_batch_change(batch_id, id)"
+        )
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(import_batch)")}
+        for name, definition in IMPORT_BATCH_ADDITIONS.items():
+            if name not in columns:
+                db.execute(f"ALTER TABLE import_batch ADD COLUMN {name} {definition}")
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_import_batch_idempotency "
+            "ON import_batch(idempotency_key) WHERE idempotency_key IS NOT NULL"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_student_external_identity_student "
+            "ON student_external_identity(student_id)"
         )
