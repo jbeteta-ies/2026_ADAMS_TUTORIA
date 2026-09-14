@@ -72,4 +72,18 @@ every candidate/diagnostic, reject malformed input with a `RejectedRow`, and
 return independent successes rather than failing the whole batch. Do not add
 source columns, raw rows, credentials, or operational data to this module or
 tracked tests. New adapters should have synthetic tests for valid rows,
-rejected rows, warnings, and partial success.
+ rejected rows, warnings, and partial success.
+
+## Spreadsheet contracts
+
+`adams_tutoria.excel_contract` defines three separate typed records:
+`StudentRecord`, `ProgressRecord`, and `EvaluationRecord`. Their configurable
+column objects are caller-owned mappings; the project does not assert any
+official ADAMS header names. Values are normalized conservatively (whitespace,
+finite numbers, and ISO-8601 timestamps), while optional fields including
+`action` and `group` remain nullable. Evaluation status labels require an
+explicit caller mapping. Each row retains minimal provenance and failures are
+returned independently, allowing partial success. Bounded `raw_values` may
+contain only a selected set of short scalar values, never a complete row.
+These contracts do not create courses or editions and do not persist source
+files or rows.
