@@ -21,6 +21,16 @@ CREATE TABLE IF NOT EXISTS progress_snapshot (
     id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
     captured_at TEXT NOT NULL, progress_percentage TEXT NOT NULL, external_id TEXT
 );
+CREATE TABLE IF NOT EXISTS content_node (
+    id TEXT PRIMARY KEY, course_id TEXT NOT NULL REFERENCES course(id),
+    edition_id TEXT NOT NULL REFERENCES edition(id), node_type TEXT NOT NULL,
+    title TEXT NOT NULL, parent_id TEXT REFERENCES content_node(id), external_id TEXT
+);
+CREATE TABLE IF NOT EXISTS content_progress_snapshot (
+    id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
+    node_id TEXT NOT NULL REFERENCES content_node(id), captured_at TEXT NOT NULL,
+    progress_percentage TEXT NOT NULL, external_id TEXT
+);
 CREATE TABLE IF NOT EXISTS evaluation (
     id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
     target_type TEXT NOT NULL, target_id TEXT NOT NULL, status TEXT NOT NULL,

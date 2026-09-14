@@ -68,6 +68,13 @@ def initialize_database(path: Path) -> None:
             "ON tutor_action(enrollment_id, occurred_at)"
         )
         db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_content_node_edition ON content_node(edition_id, id)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_content_snapshot_scope "
+            "ON content_progress_snapshot(enrollment_id, node_id, captured_at)"
+        )
+        db.execute(
             "CREATE INDEX IF NOT EXISTS idx_import_batch_change_batch "
             "ON import_batch_change(batch_id, id)"
         )
