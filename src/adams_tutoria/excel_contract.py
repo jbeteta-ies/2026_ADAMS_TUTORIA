@@ -62,8 +62,34 @@ class ProgressExcelColumns:
 
 
 class EvaluationStatus(StrEnum):
+    """Lifecycle state of the evaluation record, not its result."""
+
     PENDING = "pending"
     COMPLETED = "completed"
+
+
+class EvaluationResultStatus(StrEnum):
+    """Semantic state of an observed evaluation result."""
+
+    NOT_ATTEMPTED = "not_attempted"
+    ATTEMPTED = "attempted"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationResult:
+    """A result observation without grading or pass/fail inference.
+
+    ``raw_value`` is retained as supplied. ``scale`` is descriptive only: an
+    explicitly supplied percentage is not converted, and an unknown scale is
+    never normalised.
+    """
+
+    status: EvaluationResultStatus
+    raw_value: str | None = None
+    numeric_value: Decimal | None = None
+    maximum: Decimal | None = None
+    scale: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +119,7 @@ class EvaluationExcelColumns:
     action: str | None = None
     group: str | None = None
     raw_columns: tuple[str, ...] = ()
+    scale: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +169,7 @@ class EvaluationRecord:
     group: str | None = None
     provenance: Provenance | None = None
     raw_values: RawValues = ()
+    result: EvaluationResult = EvaluationResult(EvaluationResultStatus.UNKNOWN)
 
 
 RecordT = TypeVar("RecordT")
@@ -273,32 +301,38 @@ class EvaluationExcelAdapter(_Adapter[EvaluationRecord]):
         enrollment_id = _text(row, c.enrollment_id)
         if identity is None and enrollment_id is None:
             raise ValueError("evaluation row lacks scoped student or enrollment identity")
-        score = _decimal(row, c.score)
+        raw_score = _result(row, c.score, _text(row, c.scale))
+        score = raw_score.numeric_value
         max_score = _decimal(row, c.max_score)
-        if max_score is not None and score is None:
-            raise ValueError("max score requires score")
         passed = _text(row, c.passed)
         passed_value = None if passed is None else passed.lower() in {"true", "yes", "1"}
         if passed is not None and passed.lower() not in {"true", "false", "yes", "no", "1", "0"}:
             raise ValueError("passed value is invalid")
         return EvaluationRecord(
             statuses[source_status],
-            _text(row, c.target),
-            _text(row, c.evaluation_id),
-            score,
-            max_score,
-            passed_value,
-            _timestamp(row, c.completed_at),
-            identity,
-            _text(row, c.name),
-            _text(row, c.email),
-            enrollment_id,
-            _text(row, c.edition_id),
-            _text(row, c.edition_label),
-            _text(row, c.action),
-            _text(row, c.group),
-            provenance,
-            _raw(row, c.raw_columns),
+            target=_text(row, c.target),
+            evaluation_id=_text(row, c.evaluation_id),
+            score=score,
+            max_score=max_score,
+            passed=passed_value,
+            completed_at=_timestamp(row, c.completed_at),
+            identity=identity,
+            name=_text(row, c.name),
+            email=_text(row, c.email),
+            enrollment_id=enrollment_id,
+            edition_id=_text(row, c.edition_id),
+            edition_label=_text(row, c.edition_label),
+            action=_text(row, c.action),
+            group=_text(row, c.group),
+            provenance=provenance,
+            raw_values=_raw(row, c.raw_columns),
+            result=EvaluationResult(
+                raw_score.status,
+                raw_score.raw_value,
+                raw_score.numeric_value,
+                max_score,
+                raw_score.scale,
+            ),
         )
 
 
@@ -341,6 +375,42 @@ def _decimal(row: Row, column: str | None, *, required: bool = False) -> Decimal
     if not parsed.is_finite():
         raise ValueError("numeric value is not finite")
     return parsed
+
+
+def _result(row: Row, column: str | None, scale: str | None) -> EvaluationResult:
+    """Parse result semantics without changing the source scale."""
+    if column is None or row.get(column) is None:
+        return EvaluationResult(EvaluationResultStatus.UNKNOWN, scale=scale)
+    value = row[column]
+    if isinstance(value, bool):
+        return EvaluationResult(EvaluationResultStatus.UNKNOWN, str(value), scale=scale)
+    if isinstance(value, str):
+        if value == '"':
+            return EvaluationResult(EvaluationResultStatus.NOT_ATTEMPTED, value, scale=scale)
+        text = value.strip()
+        if not text:
+            return EvaluationResult(EvaluationResultStatus.UNKNOWN, value, scale=scale)
+    elif isinstance(value, (Real, Decimal)):
+        text = str(value)
+    else:
+        return EvaluationResult(EvaluationResultStatus.UNKNOWN, str(value), scale=scale)
+    try:
+        numeric = Decimal(text)
+    except InvalidOperation:
+        raw_value = value if isinstance(value, str) else text
+        return EvaluationResult(EvaluationResultStatus.UNKNOWN, raw_value, scale=scale)
+    if not numeric.is_finite():
+        return EvaluationResult(
+            EvaluationResultStatus.UNKNOWN,
+            value if isinstance(value, str) else text,
+            scale=scale,
+        )
+    return EvaluationResult(
+        EvaluationResultStatus.ATTEMPTED,
+        value if isinstance(value, str) else text,
+        numeric,
+        scale=scale,
+    )
 
 
 def _timestamp(row: Row, column: str | None) -> datetime | None:
