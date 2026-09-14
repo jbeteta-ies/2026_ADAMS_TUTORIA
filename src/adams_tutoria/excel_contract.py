@@ -53,6 +53,7 @@ class ProgressExcelColumns:
     student_id: str | None = None
     enrollment_id: str | None = None
     edition_id: str | None = None
+    node_id: str | None = None
     edition_label: str | None = None
     recorded_at: str | None = None
     action: str | None = None
@@ -115,6 +116,7 @@ class ProgressRecord:
     edition_id: str | None = None
     edition_label: str | None = None
     recorded_at: datetime | None = None
+    node_id: str | None = None
     action: str | None = None
     group: str | None = None
     provenance: Provenance | None = None
@@ -236,6 +238,7 @@ class ProgressExcelAdapter(_Adapter[ProgressRecord]):
             edition_id,
             _text(row, c.edition_label),
             _timestamp(row, c.recorded_at),
+            _text(row, c.node_id),
             _text(row, c.action),
             _text(row, c.group),
             provenance,
