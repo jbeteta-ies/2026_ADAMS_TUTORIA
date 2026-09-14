@@ -87,3 +87,14 @@ returned independently, allowing partial success. Bounded `raw_values` may
 contain only a selected set of short scalar values, never a complete row.
 These contracts do not create courses or editions and do not persist source
 files or rows.
+
+## Evolution application
+
+`ProgressRecord` is normalized evidence only. `ProgressImportService` applies it
+against an already existing enrollment and content node; it does not create or
+infer either one. The stored node snapshots are append-only. An observation is
+identified deterministically by enrollment, node, capture timestamp, and
+normalized percentage, so replaying it is unchanged while a different value is
+a new historical snapshot. Invalid percentages, missing timestamps, unknown
+references, and cross-edition references become privacy-safe `ImportBatchChange`
+diagnostics. Evaluation records use a separate table and service boundary.

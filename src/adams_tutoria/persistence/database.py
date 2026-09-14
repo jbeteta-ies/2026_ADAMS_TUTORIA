@@ -75,6 +75,10 @@ def initialize_database(path: Path) -> None:
             "ON content_progress_snapshot(enrollment_id, node_id, captured_at)"
         )
         db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_content_snapshot_observation "
+            "ON content_progress_snapshot(enrollment_id, node_id, captured_at, progress_percentage)"
+        )
+        db.execute(
             "CREATE INDEX IF NOT EXISTS idx_import_batch_change_batch "
             "ON import_batch_change(batch_id, id)"
         )
