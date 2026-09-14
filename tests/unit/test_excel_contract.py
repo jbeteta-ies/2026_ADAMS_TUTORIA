@@ -5,6 +5,7 @@ from decimal import Decimal
 from adams_tutoria.excel_contract import (
     EvaluationExcelAdapter,
     EvaluationExcelColumns,
+    EvaluationResultStatus,
     EvaluationStatus,
     ProgressExcelAdapter,
     ProgressExcelColumns,
@@ -64,3 +65,65 @@ def test_raw_values_are_bounded_and_never_the_full_row() -> None:
         [{"name": "Alumno 002", "secret": "not selected"}]
     )
     assert result.accepted[0].raw_values == (("name", "Alumno 002"),)
+
+
+def test_evaluation_result_semantics_are_separate_from_lifecycle() -> None:
+    adapter = EvaluationExcelAdapter(
+        EvaluationExcelColumns(
+            status="state",
+            status_values=(("open", EvaluationStatus.PENDING),),
+            enrollment_id="en",
+            score="result",
+            max_score="maximum",
+            scale="scale",
+        )
+    )
+    result = adapter.adapt(
+        [
+            {"state": "open", "en": "en-1", "result": '"'},
+            {"state": "open", "en": "en-2", "result": 0, "maximum": 10},
+            {"state": "open", "en": "en-3", "result": "", "maximum": 10},
+            {"state": "open", "en": "en-4", "result": " 7.5 ", "scale": "percent"},
+            {"state": "open", "en": "en-5", "result": "n/a"},
+        ]
+    )
+    records = result.accepted
+    assert records[0].result.status is EvaluationResultStatus.NOT_ATTEMPTED
+    assert records[0].result.raw_value == '"'
+    assert records[1].result.status is EvaluationResultStatus.ATTEMPTED
+    assert records[1].result.numeric_value == Decimal("0")
+    assert records[1].result.maximum == Decimal("10")
+    assert records[2].result.status is EvaluationResultStatus.UNKNOWN
+    assert records[2].result.raw_value == ""
+    assert records[3].result.numeric_value == Decimal("7.5")
+    assert records[3].result.raw_value == " 7.5 "
+    assert records[3].result.scale == "percent"
+    assert records[4].result.status is EvaluationResultStatus.UNKNOWN
+    assert all(record.passed is None for record in records)
+
+
+def test_missing_and_unknown_scales_are_not_normalized() -> None:
+    adapter = EvaluationExcelAdapter(
+        EvaluationExcelColumns(
+            status="state",
+            status_values=(("open", EvaluationStatus.PENDING),),
+            enrollment_id="en",
+            score="result",
+            scale="scale",
+        )
+    )
+    result = adapter.adapt(
+        [
+            {"state": "open", "en": "en-1", "result": 25, "scale": "percent"},
+            {"state": "open", "en": "en-2", "result": 25, "scale": "vendor-scale"},
+            {"state": "open", "en": "en-3", "result": 25},
+        ]
+    )
+
+    records = result.accepted
+    assert [record.result.scale for record in records] == ["percent", "vendor-scale", None]
+    assert [record.result.numeric_value for record in records] == [
+        Decimal("25"),
+        Decimal("25"),
+        Decimal("25"),
+    ]

@@ -15,7 +15,17 @@ the explicit `status_mapping`; unknown statuses are rejected. Only a source
 status mapped to `completed` emits `status=completed`. `completed_at`, `score`,
 and `passed` are optional result values and never infer completion. Scores are
 preserved as scalar text and `passed` is accepted only as an explicit boolean
-value; no grade or pass calculation is performed.
+value; no grade or pass calculation is performed. `EvaluationStatus` remains the
+evaluation lifecycle (`pending`/`completed`), while `EvaluationResultStatus` describes
+the result independently: `not_attempted`, `attempted`, or `unknown`.
+
+The exact raw marker `"` means `not_attempted`; an absent, empty, or non-interpretable
+value means `unknown`; and numeric zero is `attempted`. Raw value, numeric value,
+maximum, and optional scale remain separate. The raw score text is retained exactly;
+whitespace is used only to parse a numeric value. Numeric values are never converted
+to percentages: a percentage is descriptive only when explicitly mapped, and an
+unknown scale is not normalised. A maximum may be present even when the score is
+unknown. No `passed`/`approved` value is inferred.
 
 Rows need conservative enrollment evidence and, when `evaluation_reference`
 and/or `target_label` is configured, usable evidence in at least one of those
