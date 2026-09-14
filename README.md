@@ -164,6 +164,15 @@ The standard-library domain model defines seven frozen entities in
   one enrollment.
   `progress_percentage` is a `Decimal` in the inclusive range 0 through 100,
   and `captured_at` must be timezone-aware.
+- `ContentNode(id, course, edition, node_type, title, parent=None,
+  external_id=None)` models only an explicitly supplied hierarchy. `node_type`
+  is `MODULE`, `SUBMODULE`, or `ELEMENT`; the latter two require the
+  corresponding parent level. The node's `Course` and `Edition` are validated
+  and must agree, but are never created by node persistence.
+- `ContentProgressSnapshot(id, enrollment, node, captured_at,
+  progress_percentage, external_id=None)` records dated, append-only progress
+  observations for one enrollment and node. Its percentage is a finite
+  `Decimal` from 0 through 100. It is separate from `Evaluation`.
 - `Evaluation(id, enrollment, target_type, target_id, status=PENDING,
   score=None, max_score=None, passed=None, completed_at=None,
   target_label=None, external_id=None)` represents an evaluation at

@@ -123,7 +123,74 @@ class ProgressSnapshot:
 
     def __post_init__(self) -> None:
         _require_aware(self.captured_at, "captured_at")
-        if not Decimal("0") <= self.progress_percentage <= Decimal("100"):
+        if not self.progress_percentage.is_finite() or not (
+            Decimal("0") <= self.progress_percentage <= Decimal("100")
+        ):
+            raise ValueError("progress_percentage must be between 0 and 100")
+        if self.external_id is not None:
+            _require_non_blank(self.external_id, "external_id")
+
+
+class ContentNodeType(Enum):
+    """Supported levels in an explicitly supplied content hierarchy."""
+
+    MODULE = "module"
+    SUBMODULE = "submodule"
+    ELEMENT = "element"
+
+
+@dataclass(frozen=True)
+class ContentNode:
+    """A course-edition content node with an optional typed parent."""
+
+    id: UUID
+    course: Course
+    edition: Edition
+    node_type: ContentNodeType
+    title: str
+    parent: "ContentNode | None" = None
+    external_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_blank(self.title, "title")
+        if self.edition.course.id != self.course.id:
+            raise ValueError("edition must belong to course")
+        if self.external_id is not None:
+            _require_non_blank(self.external_id, "external_id")
+        expected_parent = {
+            ContentNodeType.MODULE: None,
+            ContentNodeType.SUBMODULE: ContentNodeType.MODULE,
+            ContentNodeType.ELEMENT: ContentNodeType.SUBMODULE,
+        }[self.node_type]
+        if expected_parent is None:
+            if self.parent is not None:
+                raise ValueError("module cannot have a parent")
+        elif self.parent is None or self.parent.node_type is not expected_parent:
+            raise ValueError(f"{self.node_type.value} requires a {expected_parent.value} parent")
+        if self.parent is not None and (
+            self.parent.course.id != self.course.id or self.parent.edition.id != self.edition.id
+        ):
+            raise ValueError("parent must belong to the same course and edition")
+
+
+@dataclass(frozen=True)
+class ContentProgressSnapshot:
+    """Append-only observation of one enrollment's progress on one node."""
+
+    id: UUID
+    enrollment: Enrollment
+    node: ContentNode
+    captured_at: datetime
+    progress_percentage: Decimal
+    external_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_aware(self.captured_at, "captured_at")
+        if self.enrollment.edition.id != self.node.edition.id:
+            raise ValueError("node must belong to enrollment edition")
+        if not self.progress_percentage.is_finite() or not (
+            Decimal("0") <= self.progress_percentage <= Decimal("100")
+        ):
             raise ValueError("progress_percentage must be between 0 and 100")
         if self.external_id is not None:
             _require_non_blank(self.external_id, "external_id")
