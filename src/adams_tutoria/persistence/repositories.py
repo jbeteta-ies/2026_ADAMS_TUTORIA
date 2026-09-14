@@ -11,6 +11,9 @@ from uuid import UUID
 from adams_tutoria.domain import (
     CommunicationRecord,
     CommunicationStatus,
+    ContentNode,
+    ContentNodeType,
+    ContentProgressSnapshot,
     ContentSource,
     ContentSourceType,
     Course,
@@ -226,6 +229,113 @@ class ProgressSnapshotRepository(_Repository):
                     "SELECT id FROM progress_snapshot WHERE enrollment_id = ? "
                     "ORDER BY captured_at, id",
                     (str(enrollment_id),),
+                )
+            ]
+        return tuple(record for record_id in ids if (record := self.get(record_id)) is not None)
+
+
+class ContentNodeRepository(_Repository):
+    table = "content_node"
+
+    def save(self, value: ContentNode) -> None:
+        with connection(self.path) as db:
+            db.execute(
+                """INSERT INTO content_node
+                (id,course_id,edition_id,node_type,title,parent_id,external_id)
+                VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+                course_id=excluded.course_id,edition_id=excluded.edition_id,
+                node_type=excluded.node_type,title=excluded.title,parent_id=excluded.parent_id,
+                external_id=excluded.external_id""",
+                (
+                    to_db(value.id),
+                    to_db(value.course.id),
+                    to_db(value.edition.id),
+                    to_db(value.node_type),
+                    value.title,
+                    to_db(value.parent.id) if value.parent else None,
+                    value.external_id,
+                ),
+            )
+
+    def get(self, record_id: UUID) -> ContentNode | None:
+        row = self._row(record_id)
+        if row is None:
+            return None
+        course = CourseRepository(self.path).get(UUID(row["course_id"]))
+        edition = EditionRepository(self.path).get(UUID(row["edition_id"]))
+        parent = self.get(UUID(row["parent_id"])) if row["parent_id"] else None
+        return (
+            None
+            if course is None or edition is None
+            else ContentNode(
+                UUID(row["id"]),
+                course,
+                edition,
+                ContentNodeType(row["node_type"]),
+                row["title"],
+                parent,
+                row["external_id"],
+            )
+        )
+
+    def list_for_edition(self, edition_id: UUID) -> tuple[ContentNode, ...]:
+        with connection(self.path) as db:
+            ids = [
+                UUID(row["id"])
+                for row in db.execute(
+                    "SELECT id FROM content_node WHERE edition_id = ? ORDER BY id",
+                    (str(edition_id),),
+                )
+            ]
+        return tuple(record for record_id in ids if (record := self.get(record_id)) is not None)
+
+
+class ContentProgressSnapshotRepository(_Repository):
+    table = "content_progress_snapshot"
+
+    def save(self, value: ContentProgressSnapshot) -> None:
+        with connection(self.path) as db:
+            db.execute(
+                "INSERT INTO content_progress_snapshot VALUES(?,?,?,?,?,?)",
+                (
+                    to_db(value.id),
+                    to_db(value.enrollment.id),
+                    to_db(value.node.id),
+                    to_db(value.captured_at),
+                    to_db(value.progress_percentage),
+                    value.external_id,
+                ),
+            )
+
+    def get(self, record_id: UUID) -> ContentProgressSnapshot | None:
+        row = self._row(record_id)
+        if row is None:
+            return None
+        enrollment = EnrollmentRepository(self.path).get(UUID(row["enrollment_id"]))
+        node = ContentNodeRepository(self.path).get(UUID(row["node_id"]))
+        return (
+            None
+            if enrollment is None or node is None
+            else ContentProgressSnapshot(
+                UUID(row["id"]),
+                enrollment,
+                node,
+                datetime.fromisoformat(row["captured_at"]),
+                Decimal(row["progress_percentage"]),
+                row["external_id"],
+            )
+        )
+
+    def list_for_enrollment_and_node(
+        self, enrollment_id: UUID, node_id: UUID
+    ) -> tuple[ContentProgressSnapshot, ...]:
+        with connection(self.path) as db:
+            ids = [
+                UUID(row["id"])
+                for row in db.execute(
+                    "SELECT id FROM content_progress_snapshot "
+                    "WHERE enrollment_id = ? AND node_id = ? ORDER BY captured_at, id",
+                    (str(enrollment_id), str(node_id)),
                 )
             ]
         return tuple(record for record_id in ids if (record := self.get(record_id)) is not None)

@@ -12,6 +12,9 @@ from adams_tutoria.config import default_config
 from adams_tutoria.domain import (
     CommunicationRecord,
     CommunicationStatus,
+    ContentNode,
+    ContentNodeType,
+    ContentProgressSnapshot,
     ContentSource,
     ContentSourceType,
     Course,
@@ -31,6 +34,8 @@ from adams_tutoria.domain import (
 from adams_tutoria.persistence.database import connection, database_path, initialize_database
 from adams_tutoria.persistence.repositories import (
     CommunicationRecordRepository,
+    ContentNodeRepository,
+    ContentProgressSnapshotRepository,
     CourseRepository,
     EditionRepository,
     EnrollmentRepository,
@@ -75,6 +80,8 @@ def test_initialization_is_idempotent_and_has_all_tables(tmp_path: Path) -> None
             "student",
             "enrollment",
             "progress_snapshot",
+            "content_node",
+            "content_progress_snapshot",
             "evaluation",
             "communication_record",
             "tutor_action",
@@ -177,6 +184,64 @@ def test_all_entities_round_trip_continues_after_content_source_test(tmp_path: P
     )
     CommunicationRecordRepository(path).save(communication)
     assert CommunicationRecordRepository(path).get(communication.id) == communication
+
+
+def test_content_hierarchy_and_append_only_progress_round_trip(tmp_path: Path) -> None:
+    path = tmp_path / "content-hierarchy.sqlite3"
+    course, edition, _, enrollment = _ready(path)
+    module = ContentNode(uuid4(), course, edition, ContentNodeType.MODULE, "Synthetic module")
+    submodule = ContentNode(
+        uuid4(), course, edition, ContentNodeType.SUBMODULE, "Synthetic submodule", module
+    )
+    element = ContentNode(
+        uuid4(), course, edition, ContentNodeType.ELEMENT, "Synthetic element", submodule
+    )
+    nodes = ContentNodeRepository(path)
+    for node in (module, submodule, element):
+        nodes.save(node)
+    assert nodes.get(element.id) == element
+    assert {node.id for node in nodes.list_for_edition(edition.id)} == {
+        module.id,
+        submodule.id,
+        element.id,
+    }
+
+    snapshots = ContentProgressSnapshotRepository(path)
+    first = ContentProgressSnapshot(
+        uuid4(), enrollment, element, datetime(2026, 2, 1, tzinfo=UTC), Decimal("20")
+    )
+    second = ContentProgressSnapshot(
+        uuid4(), enrollment, element, datetime(2026, 2, 2, tzinfo=UTC), Decimal("80")
+    )
+    snapshots.save(first)
+    snapshots.save(second)
+    assert snapshots.list_for_enrollment_and_node(enrollment.id, element.id) == (first, second)
+    with pytest.raises(sqlite3.IntegrityError):
+        snapshots.save(first)
+
+
+def test_content_nodes_and_progress_reject_invalid_scope_and_percentage(tmp_path: Path) -> None:
+    course, edition, student, enrollment = _graph()
+    other_edition = Edition(uuid4(), course, "Other")
+    module = ContentNode(uuid4(), course, edition, ContentNodeType.MODULE, "Synthetic module")
+    with pytest.raises(ValueError):
+        ContentNode(uuid4(), course, edition, ContentNodeType.ELEMENT, "Synthetic element")
+    with pytest.raises(ValueError):
+        ContentNode(
+            uuid4(), course, other_edition, ContentNodeType.SUBMODULE, "Synthetic submodule", module
+        )
+    with pytest.raises(ValueError):
+        ContentProgressSnapshot(
+            uuid4(), enrollment, module, datetime(2026, 2, 1, tzinfo=UTC), Decimal("NaN")
+        )
+    with pytest.raises(ValueError):
+        ContentProgressSnapshot(
+            uuid4(),
+            Enrollment(uuid4(), student, other_edition),
+            module,
+            datetime(2026, 2, 1, tzinfo=UTC),
+            Decimal("1"),
+        )
 
 
 def test_optionals_round_trip_as_none(tmp_path: Path) -> None:
