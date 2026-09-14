@@ -48,3 +48,10 @@ Esta funcionalidad no parsea Excel, no crea cursos/ediciones, no procesa
 evaluaciones ni progreso y no incluye interfaz de usuario. Las pruebas y
 ejemplos deben usar siempre datos sintéticos; la base operativa permanece en
 almacenamiento local ignorado.
+
+`StudentReconciliationService` es la frontera de aplicación para el contrato
+`StudentRecord` de la hoja de alumnos. Recibe la edición seleccionada
+manualmente, la convierte en candidatos de matrícula y delega toda la
+resolución y persistencia en `EnrollmentLifecycleService`. Una edición ausente
+falla antes de escribir; los registros sin identidad estable no se emparejan
+por nombre o correo.
