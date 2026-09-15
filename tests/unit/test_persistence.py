@@ -21,6 +21,7 @@ from adams_tutoria.domain import (
     Edition,
     Enrollment,
     Evaluation,
+    EvaluationResultStatus,
     EvaluationStatus,
     EvaluationTargetType,
     ImportBatch,
@@ -92,6 +93,8 @@ def test_initialization_is_idempotent_and_has_all_tables(tmp_path: Path) -> None
             "enrollment_state",
             "student_history",
             "enrollment_history",
+            "evaluation_external_identity",
+            "evaluation_history",
         }
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
@@ -260,6 +263,32 @@ def test_optionals_round_trip_as_none(tmp_path: Path) -> None:
     )
     EvaluationRepository(path).save(evaluation)
     assert EvaluationRepository(path).get(evaluation.id) == evaluation
+
+
+def test_evaluation_result_fields_round_trip(tmp_path: Path) -> None:
+    path = tmp_path / "evaluation-result.sqlite3"
+    _, _, _, enrollment = _ready(path)
+    evaluation = Evaluation(
+        uuid4(),
+        enrollment,
+        EvaluationTargetType.ACTIVITY,
+        "activity-result",
+        EvaluationStatus.COMPLETED,
+        result_status=EvaluationResultStatus.ATTEMPTED,
+        raw_value=" 7.5 ",
+        numeric_value=Decimal("7.5"),
+        scale="points-10",
+    )
+
+    repository = EvaluationRepository(path)
+    repository.save(evaluation)
+
+    restored = repository.get(evaluation.id)
+    assert restored is not None
+    assert restored.result_status is EvaluationResultStatus.ATTEMPTED
+    assert restored.raw_value == " 7.5 "
+    assert restored.numeric_value == Decimal("7.5")
+    assert restored.scale == "points-10"
 
 
 def test_snapshot_is_insert_only_and_upserts_evaluation_and_communication(tmp_path: Path) -> None:
