@@ -74,6 +74,26 @@ source columns, raw rows, credentials, or operational data to this module or
 tracked tests. New adapters should have synthetic tests for valid rows,
  rejected rows, warnings, and partial success.
 
+## Pipeline boundaries and non-file sources
+
+`adams_tutoria.import_pipeline` makes the application stages explicit: an
+adapter loads an `ImportResult[ImportDataset]`, existing services resolve and
+diff normalized records, and `ImportReviewService` previews them before
+`ImportOperationService.confirm` applies the complete batch atomically. The
+last step still requires human confirmation and an idempotency key.
+
+`ImportOperationService` and the UI depend on this adapter boundary, not on
+Excel. `InMemoryImportAdapter` is a synthetic non-file example that follows
+the same path to preview and confirmation. Excel remains an input adapter:
+workbook reading and configurable mappings stay at the edge in
+`tabular_import` and `excel_contract`. Future adapters must not create courses
+or editions, bypass resolution, persist raw input, or send data remotely.
+
+Malformed records should become short, privacy-safe diagnostics. The common
+pipeline rejects an adapter that does not provide exactly one normalized
+dataset; rejected, conflicting, or erroneous changes cannot be confirmed.
+Source names are reduced to safe kind labels and raw rows are never retained.
+
 ## Spreadsheet contracts
 
 `adams_tutoria.excel_contract` defines three separate typed records:
