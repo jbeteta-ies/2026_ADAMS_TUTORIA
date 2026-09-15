@@ -228,4 +228,8 @@ UI, OCR, and ADAMS connectors are intentionally out of scope.
 The source-independent import boundary is documented in
 [`docs/import-contract.md`](docs/import-contract.md). It defines typed
 candidate records, evidence rules, safe diagnostics, partial-success results,
-and the `ImportAdapter` protocol without implementing source parsing.
+and the `ImportAdapter` protocol without implementing source parsing. The
+common operation pipeline also accepts non-file adapters; the synthetic
+`InMemoryImportAdapter` example reaches the same preview and explicit
+confirmation boundary as Excel without coupling persistence or UI to a
+workbook.
