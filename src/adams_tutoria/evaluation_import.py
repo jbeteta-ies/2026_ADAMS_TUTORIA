@@ -32,32 +32,39 @@ class EvaluationImportService:
     def apply(
         self, batch: ImportBatch, records: tuple[EvaluationRecord, ...], occurred_at: datetime
     ) -> EvaluationImportResult:
+        with connection(self.path) as db:
+            return self.apply_in_connection(db, batch, records, occurred_at)
+
+    def apply_in_connection(
+        self,
+        db: sqlite3.Connection,
+        batch: ImportBatch,
+        records: tuple[EvaluationRecord, ...],
+        occurred_at: datetime,
+    ) -> EvaluationImportResult:
         if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
             raise ValueError("occurred_at must be timezone-aware")
         if batch.status not in (ImportBatchStatus.PENDING, ImportBatchStatus.CONFIRMED):
             raise ValueError("only pending or confirmed import batches may be applied")
         counts = [0, 0, 0, 0, 0]
-        with connection(self.path) as db:
-            if not self._ensure_batch(db, batch):
-                return EvaluationImportResult(0, 0, 0, 0, 0)
-            for record in records:
-                counts[0] += 1
-                db.execute("SAVEPOINT evaluation_row")
-                try:
-                    outcome = self._apply_one(db, batch, record)
-                    db.execute("RELEASE SAVEPOINT evaluation_row")
-                    counts[outcome] += 1
-                except (ValueError, sqlite3.IntegrityError) as error:
-                    db.execute("ROLLBACK TO SAVEPOINT evaluation_row")
-                    db.execute("RELEASE SAVEPOINT evaluation_row")
-                    self._change(
-                        db, batch, record, "rejected", None, "invalid_evaluation", str(error)
-                    )
-                    counts[4] += 1
-            db.execute(
-                "UPDATE import_batch SET status='applied', finished_at=? WHERE id=?",
-                (occurred_at.isoformat(), str(batch.id)),
-            )
+        if not self._ensure_batch(db, batch):
+            return EvaluationImportResult(0, 0, 0, 0, 0)
+        for record in records:
+            counts[0] += 1
+            db.execute("SAVEPOINT evaluation_row")
+            try:
+                outcome = self._apply_one(db, batch, record)
+                db.execute("RELEASE SAVEPOINT evaluation_row")
+                counts[outcome] += 1
+            except (ValueError, sqlite3.IntegrityError) as error:
+                db.execute("ROLLBACK TO SAVEPOINT evaluation_row")
+                db.execute("RELEASE SAVEPOINT evaluation_row")
+                self._change(db, batch, record, "rejected", None, "invalid_evaluation", str(error))
+                counts[4] += 1
+        db.execute(
+            "UPDATE import_batch SET status='applied', finished_at=? WHERE id=?",
+            (occurred_at.isoformat(), str(batch.id)),
+        )
         return EvaluationImportResult(*counts)
 
     @staticmethod
