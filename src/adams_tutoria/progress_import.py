@@ -33,22 +33,31 @@ class ProgressImportService:
     def apply(
         self, batch: ImportBatch, records: tuple[ProgressRecord, ...], occurred_at: datetime
     ) -> ProgressImportResult:
+        with connection(self.path) as db:
+            return self.apply_in_connection(db, batch, records, occurred_at)
+
+    def apply_in_connection(
+        self,
+        db: sqlite3.Connection,
+        batch: ImportBatch,
+        records: tuple[ProgressRecord, ...],
+        occurred_at: datetime,
+    ) -> ProgressImportResult:
         if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
             raise ValueError("occurred_at must be timezone-aware")
         if batch.status not in (ImportBatchStatus.PENDING, ImportBatchStatus.CONFIRMED):
             raise ValueError("only pending or confirmed import batches may be applied")
         counts = [0, 0, 0, 0]
-        with connection(self.path) as db:
-            if not self._ensure_batch(db, batch):
-                return ProgressImportResult(0, 0, 0, 0)
-            for record in records:
-                counts[0] += 1
-                outcome = self._apply_one(db, batch, record)
-                counts[outcome] += 1
-            db.execute(
-                "UPDATE import_batch SET status='applied', finished_at=? WHERE id=?",
-                (occurred_at.isoformat(), str(batch.id)),
-            )
+        if not self._ensure_batch(db, batch):
+            return ProgressImportResult(0, 0, 0, 0)
+        for record in records:
+            counts[0] += 1
+            outcome = self._apply_one(db, batch, record)
+            counts[outcome] += 1
+        db.execute(
+            "UPDATE import_batch SET status='applied', finished_at=? WHERE id=?",
+            (occurred_at.isoformat(), str(batch.id)),
+        )
         return ProgressImportResult(*counts)
 
     @staticmethod
