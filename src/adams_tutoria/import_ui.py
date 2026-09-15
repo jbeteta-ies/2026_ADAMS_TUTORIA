@@ -23,9 +23,9 @@ def render_import_operation(
 ) -> PreparedImport | None:
     """Render one local XLSX operation and an explicit total confirmation."""
     st.title("Importación local")
-    st.caption("Solo XLSX · sin conexión remota · revisión total antes de aplicar")
+    st.caption("Fuente local · sin conexión remota · revisión total antes de aplicar")
     import_type = st.selectbox("Tipo de importación", IMPORT_TYPES)
-    uploaded = st.file_uploader("Archivo XLSX", type=["xlsx"], key="import_xlsx")
+    uploaded = st.file_uploader("Fuente local", type=["xlsx"], key="import_source")
     st.info(
         f"Tipo seleccionado: {import_type}. La aplicación no presupone columnas ADAMS; "
         "la adaptación se realiza mediante los contratos existentes."
@@ -33,7 +33,7 @@ def render_import_operation(
     if uploaded is None:
         _render_history(service)
         return prepared
-    st.write({"archivo": "local-xlsx", "tamaño": uploaded.size})
+    st.write({"fuente": "local", "tamaño": uploaded.size})
     st.warning(
         "La revisión requiere una adaptación explícita del archivo al contrato. "
         "No se generan cursos ni ediciones automáticamente."
