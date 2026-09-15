@@ -176,6 +176,13 @@ existentes antes de producir el `PreparedImport`. La confirmación es siempre
 total y explícita; cualquier `REJECTED`, `CONFLICT` o `ERROR` la bloquea.
 No se guardan el fichero fuente ni sus filas.
 
+La operación confirmada se ejecuta en una única transacción SQLite: si falla
+cualquier parte del lote, se revierten las altas o cambios parciales y se
+conserva solo un registro global de error, sin filas brutas. Repetir la misma
+clave de idempotencia no duplica el lote ni sus entidades. Los cambios de
+progreso y evaluaciones se mantienen como histórico; una reimportación sin
+cambios se registra como `UNCHANGED`.
+
 Por tanto, el flujo operativo seguro para un reporte real es conservar la
 fuente localmente bajo `data/private/`, confirmar primero su procedencia y
 estructura, y no presentarla como compatible hasta disponer de una adaptación
@@ -232,6 +239,10 @@ La inicialización de SQLite es explícita e idempotente. El paquete no abre la
 base al importarse. El diseño actual no utiliza cifrado en reposo, control de
 acceso propio, WAL ni migraciones versionadas; protege los datos mediante el
 entorno local y los permisos del sistema.
+
+Estos límites son deliberados: no hay backup automático, retención automática,
+autenticación, conectores remotos, scraping ni envío a ADAMS. Una ruta
+configurada fuera de `data/` debe comprobarse manualmente antes de operar.
 
 ## 8. Copias de seguridad y retención
 
