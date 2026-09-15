@@ -32,6 +32,16 @@ class EnrollmentLifecycleService:
     def apply(
         self, batch: ImportBatch, candidates: Iterable[ImportCandidate], occurred_at: datetime
     ) -> LifecycleResult:
+        with connection(self.path) as db:
+            return self.apply_in_connection(db, batch, candidates, occurred_at)
+
+    def apply_in_connection(
+        self,
+        db: sqlite3.Connection,
+        batch: ImportBatch,
+        candidates: Iterable[ImportCandidate],
+        occurred_at: datetime,
+    ) -> LifecycleResult:
         if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
             raise ValueError("occurred_at must be timezone-aware")
         candidates = tuple(candidates)
@@ -40,57 +50,52 @@ class EnrollmentLifecycleService:
         if batch.scope_type == "full" and not batch.scope_reference:
             raise ValueError("a full batch requires scope_reference")
         counts = [0] * 8
-        with connection(self.path) as db:
-            if not self._ensure_batch(db, batch):
-                return LifecycleResult(0, 0, 0, 0, 0, 0, 0, 0)
-            self._validate_scope(db, batch, candidates)
-            seen: set[tuple[str, str, str, str]] = set()
-            for candidate in candidates:
-                present_key = self._enrollment_key(candidate)
-                if present_key is not None:
-                    # A determinable but conflicting row is present/indeterminate,
-                    # never absent during the later full-scope pass.
-                    seen.add(present_key)
-                result = self._apply_one(db, batch, candidate, occurred_at, seen)
-                counts[0] += 1
-                counts[result] += 1
-            absent = deactivated = 0
-            if batch.scope_type == "full":
-                rows = db.execute(
-                    "SELECT ee.source, ee.context, ee.source_enrollment_id, "
-                    "ee.edition_id, ee.enrollment_id "
-                    "FROM enrollment_external_identity ee LEFT JOIN enrollment_state es "  # noqa: E501
-                    "ON es.enrollment_id=ee.enrollment_id "
-                    "WHERE ee.edition_id=? AND COALESCE(es.active, 1)=1",
-                    (batch.scope_reference,),
-                ).fetchall()
-                for row in rows:
-                    key = (
-                        row["source"],
-                        row["context"],
-                        row["source_enrollment_id"],
-                        row["edition_id"],
+        if not self._ensure_batch(db, batch):
+            return LifecycleResult(0, 0, 0, 0, 0, 0, 0, 0)
+        self._validate_scope(db, batch, candidates)
+        seen: set[tuple[str, str, str, str]] = set()
+        for candidate in candidates:
+            present_key = self._enrollment_key(candidate)
+            if present_key is not None:
+                seen.add(present_key)
+            result = self._apply_one(db, batch, candidate, occurred_at, seen)
+            counts[0] += 1
+            counts[result] += 1
+        absent = deactivated = 0
+        if batch.scope_type == "full":
+            rows = db.execute(
+                "SELECT ee.source, ee.context, ee.source_enrollment_id, "
+                "ee.edition_id, ee.enrollment_id "
+                "FROM enrollment_external_identity ee LEFT JOIN enrollment_state es "
+                "ON es.enrollment_id=ee.enrollment_id "
+                "WHERE ee.edition_id=? AND COALESCE(es.active, 1)=1",
+                (batch.scope_reference,),
+            ).fetchall()
+            for row in rows:
+                key = (
+                    row["source"],
+                    row["context"],
+                    row["source_enrollment_id"],
+                    row["edition_id"],
+                )
+                if key not in seen:
+                    self._state(db, batch, UUID(row["enrollment_id"]), False, occurred_at, "absent")
+                    self._change(
+                        db,
+                        batch,
+                        "enrollment",
+                        "absent",
+                        UUID(row["enrollment_id"]),
+                        diagnostic="absent_from_full_scope",
+                        diagnostic_message="Enrollment was not present in the full batch scope",
                     )
-                    if key not in seen:
-                        self._state(
-                            db, batch, UUID(row["enrollment_id"]), False, occurred_at, "absent"
-                        )
-                        self._change(
-                            db,
-                            batch,
-                            "enrollment",
-                            "absent",
-                            UUID(row["enrollment_id"]),
-                            diagnostic="absent_from_full_scope",
-                            diagnostic_message="Enrollment was not present in the full batch scope",
-                        )
-                        absent += 1
-                        deactivated += 1
+                    absent += 1
+                    deactivated += 1
             counts[4], counts[5] = absent, deactivated
-            db.execute(
-                "UPDATE import_batch SET status='applied', finished_at=? WHERE id=?",
-                (occurred_at.isoformat(), str(batch.id)),
-            )
+        db.execute(
+            "UPDATE import_batch SET status='applied', finished_at=? WHERE id=?",
+            (occurred_at.isoformat(), str(batch.id)),
+        )
         return LifecycleResult(*counts)
 
     @staticmethod

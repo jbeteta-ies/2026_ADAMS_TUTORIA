@@ -249,6 +249,16 @@ class ImportBatchStatus(Enum):
     FAILED = "failed"
 
 
+class ImportChangeType(Enum):
+    """Closed vocabulary used by review previews and their audit trail."""
+
+    CHANGE = "CHANGE"
+    UNCHANGED = "UNCHANGED"
+    REJECTED = "REJECTED"
+    CONFLICT = "CONFLICT"
+    ERROR = "ERROR"
+
+
 @dataclass(frozen=True)
 class ImportBatch:
     """Safe, source-independent metadata for one import execution.
