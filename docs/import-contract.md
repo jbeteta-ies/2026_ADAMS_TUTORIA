@@ -98,3 +98,9 @@ normalized percentage, so replaying it is unchanged while a different value is
 a new historical snapshot. Invalid percentages, missing timestamps, unknown
 references, and cross-edition references become privacy-safe `ImportBatchChange`
 diagnostics. Evaluation records use a separate table and service boundary.
+
+`EvaluationImportService` applies them only to existing enrollments. Its stable
+key is scoped by source, context, enrollment and evaluation reference; replays
+are unchanged and changed observations append batch-linked history. It does not
+require content nodes or create structural entities, and retains
+`NOT_ATTEMPTED`, `ATTEMPTED` and `UNKNOWN` without inferring a passing result.

@@ -86,6 +86,15 @@ def initialize_database(path: Path) -> None:
         for name, definition in IMPORT_BATCH_ADDITIONS.items():
             if name not in columns:
                 db.execute(f"ALTER TABLE import_batch ADD COLUMN {name} {definition}")
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(evaluation)")}
+        for name, definition in {
+            "result_status": "TEXT NOT NULL DEFAULT 'unknown'",
+            "raw_value": "TEXT",
+            "numeric_value": "TEXT",
+            "scale": "TEXT",
+        }.items():
+            if name not in columns:
+                db.execute(f"ALTER TABLE evaluation ADD COLUMN {name} {definition}")
         db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_import_batch_idempotency "
             "ON import_batch(idempotency_key) WHERE idempotency_key IS NOT NULL"
