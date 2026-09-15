@@ -1,4 +1,4 @@
-"""Application-facing orchestration for local spreadsheet imports.
+"""Application-facing orchestration for source-independent imports.
 
 The module is intentionally independent from Streamlit.  It accepts normalized
 contracts produced by the existing adapters and delegates preview/application
@@ -22,6 +22,7 @@ from adams_tutoria.domain import (
 )
 from adams_tutoria.excel_contract import EvaluationRecord, ProgressRecord
 from adams_tutoria.import_contract import ImportCandidate, ImportResult
+from adams_tutoria.import_pipeline import ImportDatasetAdapter
 from adams_tutoria.import_review import (
     ConfirmationRequest,
     ConfirmationResult,
@@ -37,7 +38,7 @@ BLOCKING_CHANGE_TYPES = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class PreparedImport:
-    """Safe result of reading and adapting one local XLSX source."""
+    """Safe result of adapting one source and generating its preview."""
 
     batch: ImportBatch
     preview: ImportPreview
@@ -69,6 +70,33 @@ class ImportOperationService:
             raise ValueError("the local operation accepts only .xlsx files")
         return read_tabular(path, config=config)
 
+    def prepare(
+        self,
+        adapter: ImportDatasetAdapter,
+        source_name: str,
+        *,
+        context: str | None = None,
+        source_fingerprint: str | None = None,
+        created_at: datetime,
+    ) -> PreparedImport:
+        """Run an adapter through the common pipeline up to preview."""
+        result = adapter.load()
+        if len(result.accepted) != 1:
+            raise ValueError("an adapter must return exactly one normalized dataset")
+        item = result.accepted[0]
+        return self.preview(
+            source_name,
+            source_kind="other",
+            candidates=item.candidates,
+            progress=item.progress,
+            evaluations=item.evaluations,
+            rejected_rows=len(result.rejected),
+            warnings=len(result.warnings),
+            context=context,
+            source_fingerprint=source_fingerprint,
+            created_at=created_at,
+        )
+
     def preview(
         self,
         source_name: str,
@@ -80,6 +108,7 @@ class ImportOperationService:
         warnings: int = 0,
         context: str | None = None,
         source_fingerprint: str | None = None,
+        source_kind: str = "other",
         created_at: datetime,
     ) -> PreparedImport:
         """Create a safe preview; no file or input row is retained."""
@@ -87,8 +116,8 @@ class ImportOperationService:
         total = len(candidates) + len(progress) + len(evaluations) + rejected_rows
         batch = ImportBatch(
             uuid4(),
-            ImportSourceType.EXCEL,
-            _safe_source_name(source_name),
+            _source_type(source_kind),
+            _safe_source_name(source_name, source_kind),
             created_at,
             ImportBatchStatus.CONFIRMED,
             context=context,
@@ -139,6 +168,19 @@ def fingerprint_file(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def _safe_source_name(name: str) -> str:
+def _source_type(kind: str) -> ImportSourceType:
+    # ``xlsx`` is the adapter's format label, while the persisted domain
+    # vocabulary calls that source type ``excel``.  Keep that translation at
+    # the application boundary instead of exposing adapter-specific labels in
+    # persistence.
+    if kind == "xlsx":
+        return ImportSourceType.EXCEL
+    try:
+        return ImportSourceType(kind)
+    except ValueError:
+        return ImportSourceType.OTHER
+
+
+def _safe_source_name(name: str, source_kind: str) -> str:
     """Avoid persisting local paths or user-provided names as provenance."""
-    return "local-xlsx"
+    return f"local-{source_kind}" if source_kind in {"xlsx", "csv"} else "local-source"
