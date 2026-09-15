@@ -210,6 +210,14 @@ class EvaluationStatus(Enum):
     COMPLETED = "completed"
 
 
+class EvaluationResultStatus(Enum):
+    """Meaning of an observed result, independent of lifecycle status."""
+
+    NOT_ATTEMPTED = "not_attempted"
+    ATTEMPTED = "attempted"
+    UNKNOWN = "unknown"
+
+
 class CommunicationStatus(Enum):
     """Review and manual-delivery state of a communication record."""
 
@@ -371,6 +379,10 @@ class Evaluation:
     completed_at: datetime | None = None
     target_label: str | None = None
     external_id: str | None = None
+    result_status: EvaluationResultStatus = EvaluationResultStatus.UNKNOWN
+    raw_value: str | None = None
+    numeric_value: Decimal | None = None
+    scale: str | None = None
 
     def __post_init__(self) -> None:
         _require_non_blank(self.target_id, "target_id")
@@ -391,6 +403,8 @@ class Evaluation:
             or self.completed_at is not None
         ):
             raise ValueError("pending evaluation cannot contain result data")
+        if self.numeric_value is not None and not self.numeric_value.is_finite():
+            raise ValueError("numeric_value must be finite")
 
 
 @dataclass(frozen=True)
