@@ -132,3 +132,10 @@ operativos que ya no sean necesarios.
 
 Esta auditoría no introduce cifrado, autenticación, migraciones,
 dependencias nuevas ni cambios de arquitectura.
+
+La validación integral de la Issue #82 repite esta auditoría sobre rutas
+versionadas, secretos y bases operativas sin abrir la base local existente. Las
+pruebas crean SQLite exclusivamente bajo `tmp_path` y usan identidades
+sintéticas. También cubren que una confirmación parcialmente fallida no deje
+entidades aplicadas fuera de la transacción y que los adaptadores no Excel
+recorran el mismo flujo de revisión.
