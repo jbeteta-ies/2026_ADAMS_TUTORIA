@@ -162,6 +162,20 @@ El lector **no** hace ninguna de estas operaciones:
 - no persiste filas en SQLite ni copia el archivo fuente; y
 - no ofrece todavía un botón de importación en el dashboard.
 
+La operación local de importación se puede abrir con:
+
+```bash
+uv run streamlit run src/adams_tutoria/import_ui.py
+```
+
+La pantalla acepta únicamente `.xlsx`, ofrece los tres tipos iniciales
+(alumnos/matrículas, progreso y evaluaciones), muestra el historial de metadatos
+seguros y separa la presentación de `ImportOperationService`. La UI no define
+un formato ADAMS: una integración debe adaptar las filas mediante los contratos
+existentes antes de producir el `PreparedImport`. La confirmación es siempre
+total y explícita; cualquier `REJECTED`, `CONFLICT` o `ERROR` la bloquea.
+No se guardan el fichero fuente ni sus filas.
+
 Por tanto, el flujo operativo seguro para un reporte real es conservar la
 fuente localmente bajo `data/private/`, confirmar primero su procedencia y
 estructura, y no presentarla como compatible hasta disponer de una adaptación
