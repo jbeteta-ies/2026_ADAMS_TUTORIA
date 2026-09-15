@@ -20,6 +20,7 @@ from adams_tutoria.domain import (
     Edition,
     Enrollment,
     Evaluation,
+    EvaluationResultStatus,
     EvaluationStatus,
     EvaluationTargetType,
     ImportBatch,
@@ -347,12 +348,16 @@ class EvaluationRepository(_Repository):
     def save(self, value: Evaluation) -> None:
         with connection(self.path) as db:
             db.execute(
-                """INSERT INTO evaluation VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """INSERT INTO evaluation
+                (id,enrollment_id,target_type,target_id,status,score,max_score,passed,completed_at,
+                 target_label,external_id,result_status,raw_value,numeric_value,scale)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                 enrollment_id=excluded.enrollment_id,target_type=excluded.target_type,target_id=excluded.target_id,
                 status=excluded.status,score=excluded.score,max_score=excluded.max_score,passed=excluded.passed,
                 completed_at=excluded.completed_at,target_label=excluded.target_label,
-                external_id=excluded.external_id""",
+                 external_id=excluded.external_id,result_status=excluded.result_status,
+                 raw_value=excluded.raw_value,numeric_value=excluded.numeric_value,scale=excluded.scale""",
                 (
                     to_db(value.id),
                     to_db(value.enrollment.id),
@@ -365,6 +370,10 @@ class EvaluationRepository(_Repository):
                     to_db(value.completed_at),
                     value.target_label,
                     value.external_id,
+                    to_db(value.result_status),
+                    value.raw_value,
+                    to_db(value.numeric_value),
+                    value.scale,
                 ),
             )
 
@@ -373,6 +382,7 @@ class EvaluationRepository(_Repository):
         if row is None:
             return None
         enrollment = EnrollmentRepository(self.path).get(UUID(row["enrollment_id"]))
+        columns = row.keys()
         return (
             None
             if enrollment is None
@@ -388,6 +398,14 @@ class EvaluationRepository(_Repository):
                 from_datetime(row["completed_at"]),
                 row["target_label"],
                 row["external_id"],
+                EvaluationResultStatus(row["result_status"])
+                if "result_status" in columns
+                else EvaluationResultStatus.UNKNOWN,
+                row["raw_value"] if "raw_value" in columns else None,
+                from_decimal(row["numeric_value"])
+                if "numeric_value" in columns and row["numeric_value"] is not None
+                else None,
+                row["scale"] if "scale" in columns else None,
             )
         )
 

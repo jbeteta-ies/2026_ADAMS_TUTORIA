@@ -35,7 +35,20 @@ CREATE TABLE IF NOT EXISTS evaluation (
     id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
     target_type TEXT NOT NULL, target_id TEXT NOT NULL, status TEXT NOT NULL,
     score TEXT, max_score TEXT, passed INTEGER, completed_at TEXT,
-    target_label TEXT, external_id TEXT
+    target_label TEXT, external_id TEXT, result_status TEXT NOT NULL DEFAULT 'unknown',
+    raw_value TEXT, numeric_value TEXT, scale TEXT
+);
+CREATE TABLE IF NOT EXISTS evaluation_external_identity (
+    source TEXT NOT NULL, context TEXT NOT NULL,
+    enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
+    evaluation_reference TEXT NOT NULL, evaluation_id TEXT NOT NULL REFERENCES evaluation(id),
+    PRIMARY KEY (source, context, enrollment_id, evaluation_reference)
+);
+CREATE TABLE IF NOT EXISTS evaluation_history (
+    id TEXT PRIMARY KEY, evaluation_id TEXT NOT NULL REFERENCES evaluation(id),
+    batch_id TEXT NOT NULL REFERENCES import_batch(id), status TEXT NOT NULL,
+    score TEXT, max_score TEXT, passed INTEGER, completed_at TEXT,
+    result_status TEXT NOT NULL, raw_value TEXT, numeric_value TEXT, scale TEXT
 );
 CREATE TABLE IF NOT EXISTS communication_record (
     id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
