@@ -2,7 +2,14 @@
 
 from pathlib import Path
 
-from adams_tutoria.dashboard import COURSES, EDITIONS, editions_for_course
+from adams_tutoria.dashboard import (
+    COURSES,
+    EDITIONS,
+    _dashboard_request,
+    _record_key,
+    editions_for_course,
+)
+from adams_tutoria.demo_summary import demo_enrollment_summaries
 
 
 def test_streamlit_shell_renders_with_apptest():
@@ -141,3 +148,27 @@ def test_unknown_course_has_no_editions():
     """Unknown selections do not expose unrelated editions."""
 
     assert editions_for_course("unknown-course") == ()
+
+
+def test_dashboard_request_is_one_enrollment_and_minimized() -> None:
+    """The UI request carries one synthetic enrollment and no identity payload."""
+    summary = demo_enrollment_summaries("edition-alpha-2026-1")[0]
+    request = _dashboard_request(summary, "seguimiento", "Mantén tono neutral")
+
+    assert request.enrollment.id == summary.enrollment_id
+    assert request.communication_type == "seguimiento"
+    assert "student_name" not in request.prompt.as_mapping()
+    assert "student_email" not in request.prompt.as_mapping()
+    assert request.prompt.context.as_mapping()["follow_up_reasons"]
+
+
+def test_dashboard_record_state_key_isolated_by_edition_and_enrollment() -> None:
+    """Draft widget state cannot collide across editions or enrollments."""
+    enrollment = demo_enrollment_summaries("edition-alpha-2026-1")[0].enrollment_id
+
+    assert _record_key("edition-alpha-2026-1", enrollment) != _record_key(
+        "edition-alpha-2026-2", enrollment
+    )
+    assert _record_key("edition-alpha-2026-1", enrollment) != _record_key(
+        "edition-alpha-2026-1", demo_enrollment_summaries("edition-alpha-2026-1")[1].enrollment_id
+    )
