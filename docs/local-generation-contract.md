@@ -14,6 +14,22 @@ minimizado y el borrador, en la base operativa local ignorada por Git. El
 borrador puede borrarse explícitamente; no se implementa retención automática
 ni envío automático.
 
+## Contexto y prompt versionado (#98)
+
+`PromptContext` es una proyección inmutable y tipada de un único
+`EnrollmentSummary`: razones semánticas, progreso observado y contadores de
+evaluaciones. No contiene identidad, contacto, IDs, informes crudos, notas
+internas ni datos de otros alumnos. `PromptRequest` mantiene separados contexto,
+tipo de comunicación, tono y texto libre opcional del tutor. El texto libre está
+limitado y no puede introducir campos de la denylist ni anular las reglas.
+
+La serialización local es determinista y se identifica como
+`prompt-context-v1`. Todo prompt incluye reglas no anulables: usar únicamente
+datos autorizados, no inventar datos o acciones, declarar ausencias y no revelar
+información sensible. La ausencia de un dato se representa como `null` o una
+colección vacía; nunca se completa por inferencia. Este contrato no añade UI,
+persistencia, transporte ni llamadas a Ollama.
+
 ## Puerto local y adaptador Ollama
 
 La generación se solicita mediante el puerto sustituible `GenerationPort`, cuya
