@@ -108,8 +108,19 @@ CREATE TABLE IF NOT EXISTS enrollment_history (
 CREATE TABLE IF NOT EXISTS generation_record (
     id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
     communication_type TEXT NOT NULL, reason TEXT NOT NULL, model_payload TEXT NOT NULL,
-    draft_text TEXT NOT NULL, created_at TEXT NOT NULL, status TEXT NOT NULL,
-    reviewed_at TEXT, edited_at TEXT, copied_at TEXT, sent_at TEXT
+    draft_text TEXT, created_at TEXT NOT NULL, status TEXT NOT NULL,
+    reviewed_at TEXT, edited_at TEXT, copied_at TEXT, sent_at TEXT,
+    model_name TEXT NOT NULL DEFAULT 'unknown', prompt_version TEXT NOT NULL DEFAULT 'unknown',
+     draft_hash TEXT, draft_ref TEXT, error_code TEXT
+);
+CREATE TABLE IF NOT EXISTS generation_transition (
+    id TEXT PRIMARY KEY, generation_id TEXT NOT NULL
+        REFERENCES generation_record(id) ON DELETE CASCADE,
+    from_status TEXT, to_status TEXT NOT NULL, occurred_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS generation_failure (
+    id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
+    occurred_at TEXT NOT NULL, error_code TEXT NOT NULL
 );
 """
 

@@ -9,10 +9,16 @@ SMTP, Ollama ni a ningún otro canal.
 El payload futuro del modelo usa una allowlist (`communication_type`, `reason`
 y contexto mínimo permitido). Nunca incluye nombre, correo, identificadores
 externos, credenciales, sesiones, exports, informes crudos ni el registro
-completo de la base de datos. La persistencia SQLite guarda el payload
-minimizado y el borrador, en la base operativa local ignorada por Git. El
-borrador puede borrarse explícitamente; no se implementa retención automática
-ni envío automático.
+completo de la base de datos. La auditoría SQLite guarda metadatos mínimos, hash
+SHA-256 y referencia UUID; el texto queda separado en
+`AppConfig.local_data_dir/generation-text/`, ignorado por Git. No se guardan
+prompts ni textos completos en auditoría o logs. `get(UUID)` recupera el archivo
+validando que `draft_ref` permanezca bajo `generation-text/`; `delete`/`retain(before)`
+eliminan registro y archivo coordinadamente, de forma idempotente. Si SQLite falla,
+el artefacto se restaura. La política operativa de referencia conserva 30 días desde
+`created_at`; no hay una tarea automática de retención. `retain(before)` solo
+se ejecuta cuando el operador la invoca. Las migraciones son aditivas y
+compatibles con bases previas.
 
 ## Operación de generación asistida (#99)
 
@@ -24,7 +30,9 @@ un payload minimizado, invoca el `GenerationPort` inyectado, valida texto no
 vacío, texto plano y el límite de 16.000 caracteres, y guarda un
 `GenerationRecord` en estado `GENERATED`.
 
-Los fallos se aíslan por matrícula: no se persiste un registro fallido ni se
+Los fallos se aíslan por matrícula: no se persiste un registro de borrador fallido,
+pero se registra un evento mínimo en `generation_failure` con instante UTC y
+`error_code` (solo nombre de excepción, sin texto ni PII), y se
 usa fallback inventado. Una solicitud posterior puede reintentarse de forma
 explícita. La operación no cambia estados posteriores, no envía mensajes y no
 realiza acciones automáticas tras persistir.
@@ -76,6 +84,17 @@ respuestas deben ser JSON con un campo `response` de texto no vacío. Los
 errores de configuración, transporte y respuesta usan excepciones tipadas.
 
 ## Persistencia y validación
+
+### Auditoría y retención (#101)
+
+La auditoría SQLite conserva metadatos mínimos, hash SHA-256 y referencia UUID;
+el texto queda separado en `AppConfig.local_data_dir/generation-text/`, ignorado
+por Git. No se guardan prompts ni textos completos en auditoría o logs.
+`GenerationRepository.get(UUID)` recupera el archivo y `delete`/`retain(before)`
+eliminan registro y archivo de forma coordinada e idempotente. La política
+operativa de referencia conserva 30 días desde `created_at`; no hay retención
+automática. `retain(before)` solo se ejecuta cuando el operador la invoca. Las
+migraciones son aditivas y compatibles con bases previas.
 
 `GenerationRepository.save` tiene semántica de *upsert* completo. Si ya existe
 el mismo `id`, todos los campos persistidos (incluidos `enrollment_id`, payload,
