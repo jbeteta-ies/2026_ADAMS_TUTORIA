@@ -14,6 +14,22 @@ minimizado y el borrador, en la base operativa local ignorada por Git. El
 borrador puede borrarse explícitamente; no se implementa retención automática
 ni envío automático.
 
+## Puerto local y adaptador Ollama
+
+La generación se solicita mediante el puerto sustituible `GenerationPort`, cuya
+operación `generate(payload)` devuelve texto de borrador. `OllamaGenerator` es
+el adaptador local incluido; recibe una `OllamaConfig` inmutable y un transporte
+HTTP opcional inyectable para pruebas. El adaptador usa `POST /api/generate`,
+envía `stream: false` y no cambia el estado de `GenerationRecord` ni realiza
+envíos.
+
+El endpoint por defecto es `http://localhost:11434`. Solo se aceptan endpoints
+HTTP sin credenciales en `localhost`, `127.0.0.1` o `::1`; HTTPS, hosts remotos,
+usuarios, contraseñas, consultas y fragmentos se rechazan. Timeout, tamaños
+máximos de solicitud/respuesta y texto generado son límites explícitos. Las
+respuestas deben ser JSON con un campo `response` de texto no vacío. Los
+errores de configuración, transporte y respuesta usan excepciones tipadas.
+
 ## Persistencia y validación
 
 `GenerationRepository.save` tiene semántica de *upsert* completo. Si ya existe
