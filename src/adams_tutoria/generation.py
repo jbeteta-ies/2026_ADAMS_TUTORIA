@@ -5,7 +5,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
 
 from .domain import Enrollment
@@ -129,3 +132,133 @@ class GenerationRecord:
 
 def payload_json(payload: Mapping[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+class GenerationError(Exception):
+    """Base error for local generation failures."""
+
+
+class InvalidEndpointError(GenerationError, ValueError):
+    """The configured endpoint is not an allowed local HTTP endpoint."""
+
+
+class GenerationConfigurationError(GenerationError, ValueError):
+    """The local model configuration is invalid."""
+
+
+class GenerationTransportError(GenerationError):
+    """The local model could not be reached or returned an HTTP failure."""
+
+
+class GenerationResponseError(GenerationError):
+    """The local model returned malformed or oversized output."""
+
+
+class GenerationPort(Protocol):
+    """Replaceable application port for generating a draft from a minimized payload."""
+
+    def generate(self, payload: Mapping[str, Any]) -> str: ...
+
+
+@dataclass(frozen=True)
+class OllamaConfig:
+    """Safe, local-only Ollama settings; no credentials are accepted."""
+
+    model: str
+    endpoint: str = "http://localhost:11434"
+    timeout_seconds: float = 30.0
+    max_request_bytes: int = 16_384
+    max_response_bytes: int = 65_536
+    max_output_characters: int = 16_000
+
+    def __post_init__(self) -> None:
+        if not self.model.strip() or len(self.model) > 200:
+            raise GenerationConfigurationError("model must be non-blank and at most 200 characters")
+        if self.timeout_seconds <= 0 or self.timeout_seconds > 300:
+            raise GenerationConfigurationError("timeout_seconds must be between 0 and 300")
+        if self.max_request_bytes <= 0 or self.max_response_bytes <= 0:
+            raise GenerationConfigurationError("request and response limits must be positive")
+        if self.max_output_characters <= 0:
+            raise GenerationConfigurationError("max_output_characters must be positive")
+        object.__setattr__(self, "endpoint", validate_local_endpoint(self.endpoint))
+
+
+def validate_local_endpoint(endpoint: str) -> str:
+    """Validate and return an endpoint restricted to plain HTTP on loopback."""
+    try:
+        parsed = urlsplit(endpoint)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as exc:
+        raise InvalidEndpointError("endpoint is malformed") from exc
+    local_names = {"localhost", "127.0.0.1", "::1"}
+    if (
+        parsed.scheme != "http"
+        or hostname not in local_names
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port is not None
+        and not 1 <= port <= 65535
+    ):
+        raise InvalidEndpointError("endpoint must be plain HTTP on localhost without credentials")
+    return endpoint.rstrip("/")
+
+
+@dataclass(frozen=True)
+class HttpResponse:
+    status: int
+    body: bytes
+
+
+class HttpTransport(Protocol):
+    def post(self, url: str, body: bytes, timeout_seconds: float) -> HttpResponse: ...
+
+
+class UrllibTransport:
+    """Small standard-library transport used only when the adapter is invoked."""
+
+    def post(self, url: str, body: bytes, timeout_seconds: float) -> HttpResponse:
+        request = Request(
+            url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+        )
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
+                return HttpResponse(response.status, response.read())
+        except HTTPError as exc:
+            raise GenerationTransportError(f"local generation HTTP status {exc.code}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise GenerationTransportError("local generation transport failed") from exc
+
+
+class OllamaGenerator:
+    """Ollama adapter for the local ``/api/generate`` endpoint."""
+
+    def __init__(self, config: OllamaConfig, transport: HttpTransport | None = None) -> None:
+        self.config = config
+        self._transport = transport or UrllibTransport()
+
+    def generate(self, payload: Mapping[str, Any]) -> str:
+        prompt = payload_json(payload)
+        request = {"model": self.config.model, "prompt": prompt, "stream": False}
+        body = json.dumps(request, separators=(",", ":")).encode("utf-8")
+        if len(body) > self.config.max_request_bytes:
+            raise GenerationConfigurationError("generation request exceeds configured limit")
+        response = self._transport.post(
+            f"{self.config.endpoint}/api/generate", body, self.config.timeout_seconds
+        )
+        if response.status < 200 or response.status >= 300:
+            raise GenerationTransportError(f"local generation HTTP status {response.status}")
+        if len(response.body) > self.config.max_response_bytes:
+            raise GenerationResponseError("generation response exceeds configured limit")
+        try:
+            decoded = json.loads(response.body)
+            result = decoded["response"]
+        except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise GenerationResponseError("local generation response is invalid") from exc
+        if not isinstance(result, str) or not result.strip():
+            raise GenerationResponseError("local generation response has no text")
+        if len(result) > self.config.max_output_characters:
+            raise GenerationResponseError("generated text exceeds configured limit")
+        return result
