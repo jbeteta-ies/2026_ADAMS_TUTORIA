@@ -354,3 +354,47 @@ copia o sus sidecars en una ruta versionada.
 Estas limitaciones son deliberadas para este MVP. No deben ocultarse mediante
 ejemplos que parezcan datos reales ni mediante afirmaciones sobre formatos de
 ADAMS que todavía no han sido verificados.
+
+## 12. Generación local con Ollama (preparación manual)
+
+La generación asistida es opcional y local. Los tests del proyecto no necesitan
+Ollama, no lo arrancan y no descargan modelos. Para una operación manual, el
+operador debe instalar Ollama siguiendo la documentación oficial de su sistema,
+iniciarlo como servicio local y preparar previamente un modelo aprobado por su
+organización. La aplicación no instala Ollama, no ejecuta `ollama pull`, no
+elige modelos por su cuenta y no acepta endpoints remotos.
+
+Antes de operar:
+
+1. Instala Ollama fuera del repositorio y verifica manualmente que el servicio
+   escucha solo en el equipo local.
+2. Descarga/prepara manualmente el modelo autorizado, conforme a la política
+   del entorno; no guardes el modelo dentro del repositorio.
+3. Configura el nombre del modelo y, si aplica, el endpoint local mediante la
+   configuración de la aplicación. El valor predeterminado es
+   `http://localhost:11434`.
+4. Comprueba que el endpoint no contiene credenciales, consultas ni fragmentos.
+   Solo se permiten `localhost`, `127.0.0.1` o `::1` por HTTP.
+5. Arranca la aplicación local y selecciona explícitamente las matrículas que
+   quieres revisar. La selección no decide destinatarios ni mezcla contextos.
+
+El adaptador usa el puerto local `/api/generate` con `stream: false`, límites de
+tiempo/tamaño y errores tipados. Cada matrícula produce como máximo un borrador
+por solicitud. Un fallo de Ollama afecta solo a esa matrícula; se registra un
+código de error mínimo y las demás pueden continuar. No hay fallback que envíe,
+apruebe o marque un borrador automáticamente.
+
+El tutor debe revisar cada motivo, contexto minimizado y texto. Puede editar,
+regenerar, descartar o copiar individualmente. `COPIED` registra la copia
+manual y `SENT` solo puede registrarse después de que el tutor haya realizado
+manualmente la acción externa; la aplicación no tiene ruta de envío a ADAMS,
+SMTP ni a otro servicio. La revisión humana y el copiado manual no se pueden
+sustituir por el modelo.
+
+Los datos reales solo deben cargarse desde rutas locales ignoradas, como
+`data/private/` para fuentes y `data/local/` para la base y textos operativos,
+o desde una ubicación externa protegida comprobada manualmente. No copies
+exports, mensajes, logs, capturas, credenciales, cookies, tokens, modelos ni
+bases reales al repositorio. Los tests y ejemplos usan únicamente datos
+sintéticos y `tmp_path`; la protección de Git no sustituye los permisos del
+sistema ni una revisión de la ruta efectiva.
