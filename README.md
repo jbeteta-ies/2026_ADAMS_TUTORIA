@@ -125,6 +125,17 @@ Do not store credentials, session cookies, API keys, real student information,
 or unredacted reports and exports in tracked files. Tests and examples must use
 synthetic data only; versioned test fixtures belong under `tests/fixtures/`.
 
+### Local generation contract
+
+`GenerationRecord` links a draft to an `Enrollment` and communication type.
+Its states are `GENERATED`, `REVIEWED`, `EDITED`, `COPIED`, `DISCARDED`, and
+`SENT`. `SENT` is only a manual external-send mark after copying; it never
+invokes ADAMS, SMTP, a model, or another external channel. SQLite stores only
+the minimized allowlisted payload and draft text. Student identity, credentials,
+sessions, raw exports, and full database records are prohibited from the model
+payload. Records can be explicitly deleted; operational databases remain local
+and ignored. See [`docs/local-generation-contract.md`](docs/local-generation-contract.md).
+
 ### SQLite persistence
 
 The persistence layer is in `adams_tutoria.persistence` and uses only Python's

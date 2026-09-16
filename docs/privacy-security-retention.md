@@ -72,6 +72,16 @@ permanecer en almacenamiento local ignorado. Los tests y ejemplos solo usan
 destinatarios sintéticos. No se autoriza el envío automático como resultado de
 esta auditoría.
 
+Los borradores de generación local (`draft_text`) pueden contener texto de
+comunicación y, por tanto, deben tratarse como datos potencialmente personales:
+se guardan únicamente en la SQLite local ignorada bajo `data/`, no se incluyen
+en payloads del modelo ni en documentación, logs o fixtures versionados. El
+operador debe borrar explícitamente los borradores y sus copias locales cuando
+ya no sean necesarios; también debe eliminar backups o sidecars que los
+contengan. No hay borrado ni retención automática implementados: hasta que una
+Issue futura defina plazos y automatización, se aplica minimización y revisión
+manual periódica.
+
 ## Logs y errores
 
 No hay un subsistema de logging persistente configurado en la aplicación. La
