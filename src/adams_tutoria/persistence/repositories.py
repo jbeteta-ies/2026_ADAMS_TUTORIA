@@ -3,11 +3,12 @@
 import json
 import sqlite3
 from collections.abc import Iterator
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from adams_tutoria.domain import (
     CommunicationRecord,
@@ -796,6 +797,15 @@ class CommunicationRecordRepository(_Repository):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class GenerationTransition:
+    id: UUID
+    generation_id: UUID
+    from_status: GenerationStatus | None
+    to_status: GenerationStatus
+    occurred_at: datetime
+
+
 class GenerationRepository(_Repository):
     """Persistence for local drafts; saving and transitions have no side effects.
 
@@ -805,38 +815,78 @@ class GenerationRepository(_Repository):
 
     table = "generation_record"
 
+    def __init__(self, path: Path, text_dir: Path | None = None) -> None:
+        super().__init__(path)
+        self.text_dir = text_dir or path.parent / "generation-text"
+
+    def _text_path(self, record_id: UUID) -> Path:
+        return self.text_dir / f"{record_id}.txt"
+
+    def _validated_draft_path(self, draft_ref: str | None) -> Path | None:
+        if not draft_ref:
+            return None
+        root = self.text_dir.resolve()
+        candidate = (self.path.parent / draft_ref).resolve()
+        if candidate.parent != root or candidate.suffix != ".txt":
+            return None
+        return candidate
+
     def save(self, value: GenerationRecord) -> None:
-        with connection(self.path) as db:
-            db.execute(
-                """INSERT INTO generation_record
+        self.text_dir.mkdir(parents=True, exist_ok=True)
+        target = self._text_path(value.id)
+        temporary = target.with_suffix(".tmp")
+        backup = target.with_suffix(".bak")
+        temporary.write_text(value.draft_text, encoding="utf-8")
+        if target.exists():
+            target.replace(backup)
+        temporary.replace(target)
+        try:
+            with connection(self.path) as db:
+                db.execute(
+                    """INSERT INTO generation_record
                 (id,enrollment_id,communication_type,reason,model_payload,draft_text,created_at,status,
-                 reviewed_at,edited_at,copied_at,sent_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                 reviewed_at,edited_at,copied_at,sent_at,model_name,prompt_version,draft_hash,draft_ref,error_code)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                  ON CONFLICT(id) DO UPDATE SET enrollment_id=excluded.enrollment_id,
                  communication_type=excluded.communication_type,reason=excluded.reason,
                  model_payload=excluded.model_payload,draft_text=excluded.draft_text,
                  created_at=excluded.created_at,status=excluded.status,
                  reviewed_at=excluded.reviewed_at,edited_at=excluded.edited_at,
-                 copied_at=excluded.copied_at,sent_at=excluded.sent_at""",
-                (
-                    str(value.id),
-                    str(value.enrollment_id),
-                    value.communication_type,
-                    value.reason,
-                    payload_json(value.model_payload),
-                    value.draft_text,
-                    value.created_at.isoformat(),
-                    value.status.value,
-                    *(
-                        item.isoformat() if item else None
-                        for item in (
-                            value.reviewed_at,
-                            value.edited_at,
-                            value.copied_at,
-                            value.sent_at,
-                        )
+                  copied_at=excluded.copied_at,sent_at=excluded.sent_at,model_name=excluded.model_name,
+                    prompt_version=excluded.prompt_version,draft_hash=excluded.draft_hash,draft_ref=excluded.draft_ref,
+                    error_code=excluded.error_code""",
+                    (
+                        str(value.id),
+                        str(value.enrollment_id),
+                        value.communication_type,
+                        value.reason,
+                        payload_json(value.model_payload),
+                        "",
+                        value.created_at.astimezone(UTC).isoformat(),
+                        value.status.value,
+                        *(
+                            item.astimezone(UTC).isoformat() if item else None
+                            for item in (
+                                value.reviewed_at,
+                                value.edited_at,
+                                value.copied_at,
+                                value.sent_at,
+                            )
+                        ),
+                        value.model_name,
+                        value.prompt_version,
+                        value.draft_sha256,
+                        str(target.relative_to(self.path.parent)),
+                        value.error_code,
                     ),
-                ),
-            )
+                )
+        except BaseException:
+            target.unlink(missing_ok=True)
+            if backup.exists():
+                backup.replace(target)
+            raise
+        else:
+            backup.unlink(missing_ok=True)
 
     def get(self, record_id: UUID) -> GenerationRecord | None:
         with connection(self.path) as db:
@@ -845,24 +895,137 @@ class GenerationRepository(_Repository):
             ).fetchone()
         if row is None:
             return None
+        draft_path = self._validated_draft_path(row["draft_ref"])
+        draft_text = (
+            draft_path.read_text(encoding="utf-8")
+            if draft_path is not None and draft_path.is_file()
+            else row["draft_text"]
+        )
+        if not draft_text:
+            return None
+        columns = set(row.keys())
+
+        def optional(name: str, default: str | None = None) -> str | None:
+            return row[name] if name in columns else default
+
         return GenerationRecord(
             UUID(row["id"]),
             UUID(row["enrollment_id"]),
             row["communication_type"],
             row["reason"],
             json.loads(row["model_payload"]),
-            row["draft_text"],
-            datetime.fromisoformat(row["created_at"]),
+            draft_text,
+            datetime.fromisoformat(row["created_at"]).astimezone(UTC),
             GenerationStatus(row["status"]),
-            *(
-                datetime.fromisoformat(row[name]) if row[name] else None
-                for name in ("reviewed_at", "edited_at", "copied_at", "sent_at")
+            reviewed_at=(
+                datetime.fromisoformat(row["reviewed_at"]).astimezone(UTC)
+                if row["reviewed_at"]
+                else None
             ),
+            edited_at=(
+                datetime.fromisoformat(row["edited_at"]).astimezone(UTC)
+                if row["edited_at"]
+                else None
+            ),
+            copied_at=(
+                datetime.fromisoformat(row["copied_at"]).astimezone(UTC)
+                if row["copied_at"]
+                else None
+            ),
+            sent_at=(
+                datetime.fromisoformat(row["sent_at"]).astimezone(UTC) if row["sent_at"] else None
+            ),
+            model_name=optional("model_name", "unknown") or "unknown",
+            prompt_version=optional("prompt_version", "unknown") or "unknown",
+            draft_hash=optional("draft_hash"),
+            draft_ref=optional("draft_ref"),
+            error_code=optional("error_code"),
         )
 
     def delete(self, record_id: UUID) -> None:
+        artifact = self._text_path(record_id)
+        tombstone = artifact.with_suffix(".delete")
+        if artifact.exists():
+            artifact.replace(tombstone)
+        try:
+            with connection(self.path) as db:
+                db.execute("DELETE FROM generation_record WHERE id = ?", (str(record_id),))
+        except BaseException:
+            if tombstone.exists():
+                tombstone.replace(artifact)
+            raise
+        else:
+            tombstone.unlink(missing_ok=True)
+
+    def retain(self, before: datetime) -> int:
+        """Delete records older than *before*, including UUID-only text artifacts."""
         with connection(self.path) as db:
-            db.execute("DELETE FROM generation_record WHERE id = ?", (str(record_id),))
+            ids = [
+                UUID(row["id"])
+                for row in db.execute(
+                    "SELECT id FROM generation_record WHERE created_at < ?",
+                    (before.astimezone(UTC).isoformat(),),
+                )
+            ]
+        for record_id in ids:
+            self.delete(record_id)
+        return len(ids)
+
+    def history(self, record_id: UUID) -> tuple["GenerationTransition", ...]:
+        with connection(self.path) as db:
+            rows = tuple(
+                db.execute(
+                    "SELECT * FROM generation_transition WHERE generation_id = "
+                    "? ORDER BY occurred_at, id",
+                    (str(record_id),),
+                )
+            )
+        return tuple(
+            GenerationTransition(
+                UUID(row["id"]),
+                UUID(row["generation_id"]),
+                GenerationStatus(row["from_status"]) if row["from_status"] else None,
+                GenerationStatus(row["to_status"]),
+                datetime.fromisoformat(row["occurred_at"]).astimezone(UTC),
+            )
+            for row in rows
+        )
+
+    def record_failure(self, enrollment_id: UUID, occurred_at: datetime, error_code: str) -> None:
+        if not error_code or any(char in error_code for char in "\r\n"):
+            raise ValueError("error_code must be a single non-blank code")
+        with connection(self.path) as db:
+            db.execute(
+                "INSERT INTO generation_failure"
+                "(id,enrollment_id,occurred_at,error_code) VALUES(?,?,?,?)",
+                (
+                    str(uuid4()),
+                    str(enrollment_id),
+                    occurred_at.astimezone(UTC).isoformat(),
+                    error_code,
+                ),
+            )
+
+    def _append_transition(
+        self,
+        record_id: UUID,
+        from_status: GenerationStatus | None,
+        status: GenerationStatus,
+        occurred_at: datetime,
+    ) -> None:
+        with connection(self.path) as db:
+            db.execute(
+                "INSERT INTO generation_transition("
+                "id,generation_id,from_status,to_status,occurred_at) "
+                "VALUES(?,?,?,?,?)",
+                (
+                    str(uuid4()),
+                    str(record_id),
+                    from_status.value if from_status else None,
+                    status.value,
+                    occurred_at.isoformat(),
+                ),
+            )
 
     def transition(
         self,
@@ -918,21 +1081,19 @@ class GenerationRepository(_Repository):
                 f"invalid generation transition: {record.status.value} -> {status.value}"
             )
         self.save(
-            GenerationRecord(
-                record.id,
-                record.enrollment_id,
-                record.communication_type,
-                record.reason,
-                record.model_payload,
-                draft_text if draft_text is not None else record.draft_text,
-                record.created_at,
-                status,
-                occurred_at if status is GenerationStatus.REVIEWED else record.reviewed_at,
-                occurred_at if status is GenerationStatus.EDITED else record.edited_at,
-                occurred_at if status is GenerationStatus.COPIED else record.copied_at,
-                occurred_at if status is GenerationStatus.SENT else record.sent_at,
+            replace(
+                record,
+                draft_text=draft_text if draft_text is not None else record.draft_text,
+                status=status,
+                reviewed_at=(
+                    occurred_at if status is GenerationStatus.REVIEWED else record.reviewed_at
+                ),
+                edited_at=occurred_at if status is GenerationStatus.EDITED else record.edited_at,
+                copied_at=occurred_at if status is GenerationStatus.COPIED else record.copied_at,
+                sent_at=occurred_at if status is GenerationStatus.SENT else record.sent_at,
             )
         )
+        self._append_transition(record_id, record.status, status, occurred_at)
 
 
 class CommunicationHistoryAdapter:

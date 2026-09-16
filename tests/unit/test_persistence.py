@@ -96,6 +96,8 @@ def test_initialization_is_idempotent_and_has_all_tables(tmp_path: Path) -> None
             "evaluation_external_identity",
             "evaluation_history",
             "generation_record",
+            "generation_transition",
+            "generation_failure",
         }
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
@@ -111,6 +113,36 @@ def test_connection_rolls_back_and_closes_transaction(tmp_path: Path) -> None:
         raise RuntimeError("synthetic failure")
     with connection(path) as db:
         assert db.execute("SELECT * FROM course").fetchone() is None
+
+
+def test_legacy_generation_record_is_migrated_additively(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.executescript(
+            """
+            CREATE TABLE course (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, code TEXT, description TEXT
+            );
+            CREATE TABLE edition (id TEXT PRIMARY KEY, course_id TEXT NOT NULL, label TEXT NOT NULL,
+                                  external_id TEXT, start_date TEXT, end_date TEXT);
+            CREATE TABLE student (
+                id TEXT PRIMARY KEY, full_name TEXT NOT NULL, email TEXT, external_id TEXT
+            );
+            CREATE TABLE enrollment (
+                id TEXT PRIMARY KEY, student_id TEXT NOT NULL, edition_id TEXT NOT NULL,
+                                     external_id TEXT);
+            CREATE TABLE generation_record (
+                id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL, communication_type TEXT NOT NULL,
+                reason TEXT NOT NULL, model_payload TEXT NOT NULL, draft_text TEXT NOT NULL,
+                created_at TEXT NOT NULL, status TEXT NOT NULL, reviewed_at TEXT, edited_at TEXT,
+                copied_at TEXT, sent_at TEXT
+            );
+            """
+        )
+    initialize_database(path)
+    with connection(path) as db:
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(generation_record)")}
+    assert {"draft_ref", "draft_hash", "error_code", "model_name", "prompt_version"} <= columns
 
 
 def test_all_entities_round_trip_every_field_and_relationship(tmp_path: Path) -> None:

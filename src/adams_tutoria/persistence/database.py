@@ -95,6 +95,17 @@ def initialize_database(path: Path) -> None:
         }.items():
             if name not in columns:
                 db.execute(f"ALTER TABLE evaluation ADD COLUMN {name} {definition}")
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(generation_record)")}
+        for name, definition in {
+            "draft_text": "TEXT",
+            "model_name": "TEXT NOT NULL DEFAULT 'unknown'",
+            "prompt_version": "TEXT NOT NULL DEFAULT 'unknown'",
+            "draft_hash": "TEXT",
+            "draft_ref": "TEXT",
+            "error_code": "TEXT",
+        }.items():
+            if name not in columns:
+                db.execute(f"ALTER TABLE generation_record ADD COLUMN {name} {definition}")
         db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_import_batch_idempotency "
             "ON import_batch(idempotency_key) WHERE idempotency_key IS NOT NULL"
@@ -102,4 +113,16 @@ def initialize_database(path: Path) -> None:
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_student_external_identity_student "
             "ON student_external_identity(student_id)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_generation_record_created "
+            "ON generation_record(created_at)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_generation_transition_generation "
+            "ON generation_transition(generation_id, occurred_at, id)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_generation_failure_enrollment_time "
+            "ON generation_failure(enrollment_id, occurred_at, id)"
         )
