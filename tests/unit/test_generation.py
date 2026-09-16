@@ -9,9 +9,16 @@ import pytest
 
 from adams_tutoria.domain import Course, Edition, Enrollment, Student
 from adams_tutoria.generation import (
+    GenerationConfigurationError,
     GenerationRecord,
+    GenerationResponseError,
     GenerationStatus,
+    HttpResponse,
+    InvalidEndpointError,
+    OllamaConfig,
+    OllamaGenerator,
     build_model_payload,
+    validate_local_endpoint,
 )
 from adams_tutoria.persistence.database import initialize_database
 from adams_tutoria.persistence.repositories import (
@@ -241,3 +248,53 @@ def test_invalid_transition_does_not_change_record(
     with pytest.raises(ValueError, match="invalid generation transition"):
         repo.transition(value.id, target, at)
     assert repo.get(value.id) == value
+
+
+class StubTransport:
+    def __init__(self, response: HttpResponse) -> None:
+        self.response = response
+        self.calls: list[tuple[str, bytes, float]] = []
+
+    def post(self, url: str, body: bytes, timeout_seconds: float) -> HttpResponse:
+        self.calls.append((url, body, timeout_seconds))
+        return self.response
+
+
+def test_ollama_adapter_uses_minimized_payload_and_injected_transport() -> None:
+    transport = StubTransport(HttpResponse(200, b'{"response":"Synthetic draft"}'))
+    generator = OllamaGenerator(OllamaConfig("synthetic-model"), transport)
+    result = generator.generate(build_model_payload("follow_up", "low progress"))
+    assert result == "Synthetic draft"
+    url, body, timeout = transport.calls[0]
+    assert url == "http://localhost:11434/api/generate"
+    assert b"student_email" not in body
+    assert b'"stream":false' in body
+    assert timeout == 30.0
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://localhost:11434",
+        "http://example.invalid:11434",
+        "http://localhost:11434?token=secret",
+        "http://user:password@localhost:11434",
+    ],
+)
+def test_ollama_rejects_non_local_or_credentialed_endpoints(endpoint: str) -> None:
+    with pytest.raises(InvalidEndpointError):
+        validate_local_endpoint(endpoint)
+
+
+def test_ollama_rejects_oversized_request_and_invalid_response() -> None:
+    generator = OllamaGenerator(
+        OllamaConfig("synthetic-model", max_request_bytes=10),
+        StubTransport(HttpResponse(200, b'{"response":"ok"}')),
+    )
+    with pytest.raises(GenerationConfigurationError, match="request"):
+        generator.generate({"reason": "synthetic"})
+    invalid = OllamaGenerator(
+        OllamaConfig("synthetic-model"), StubTransport(HttpResponse(200, b'{"text":"wrong"}'))
+    )
+    with pytest.raises(GenerationResponseError):
+        invalid.generate({"reason": "synthetic"})
