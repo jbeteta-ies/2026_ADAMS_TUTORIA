@@ -7,6 +7,7 @@ read files, or initialize a database.
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 
@@ -18,6 +19,22 @@ class AppConfig:
     data_root: Path
     private_data_dir: Path
     local_data_dir: Path
+
+    @property
+    def generation_text_dir(self) -> Path:
+        """Ignored operational directory containing UUID-named draft artifacts."""
+        return self.local_data_dir / "generation-text"
+
+    @property
+    def generation_retention_days(self) -> int:
+        """Initial deterministic retention policy for generation artifacts and audit."""
+        return 30
+
+    def generation_retention_cutoff(self, *, now: datetime | None = None) -> datetime:
+        current = datetime.now(UTC) if now is None else now
+        if current.tzinfo is None or current.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+        return current.astimezone(UTC) - timedelta(days=self.generation_retention_days)
 
 
 def _path_value(value: str, *, base_dir: Path) -> Path:

@@ -17,7 +17,7 @@ from adams_tutoria.attention import (
     PriorityThresholds,
     prioritize_attention,
 )
-from adams_tutoria.config import default_config
+from adams_tutoria.config import default_config, load_config
 from adams_tutoria.content_search import MarkdownIndex
 from adams_tutoria.demo_profile import demo_profile
 from adams_tutoria.demo_summary import demo_edition_id, demo_enrollment_summaries
@@ -273,9 +273,10 @@ def _render_page(course: CourseOption, edition: EditionOption, page: str) -> Non
 
 def _generation_repository() -> GenerationRepository:
     """Return the existing local draft repository used by the dashboard."""
-    path = database_path(default_config())
+    config = load_config()
+    path = database_path(config)
     initialize_database(path)
-    return GenerationRepository(path)
+    return GenerationRepository(path, config.generation_text_dir)
 
 
 def _dashboard_request(summary, communication_type: str, tutor_text: str) -> DraftGenerationRequest:
