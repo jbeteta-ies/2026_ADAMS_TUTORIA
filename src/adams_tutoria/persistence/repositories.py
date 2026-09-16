@@ -1,5 +1,6 @@
 """Small repositories with explicit mappings (no generic CRUD abstraction)."""
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from datetime import datetime
@@ -31,6 +32,7 @@ from adams_tutoria.domain import (
     Student,
     TutorAction,
 )
+from adams_tutoria.generation import GenerationRecord, GenerationStatus, payload_json
 
 from .database import connection
 from .serialization import from_bool, from_date, from_datetime, from_decimal, from_enum, to_db
@@ -790,6 +792,145 @@ class CommunicationRecordRepository(_Repository):
                 record.edition_id,
                 postponed_at,
                 copied_at,
+            )
+        )
+
+
+class GenerationRepository(_Repository):
+    """Persistence for local drafts; saving and transitions have no side effects.
+
+    ``save`` is a complete upsert: an existing identifier is replaced with all
+    fields from ``value``. It never performs a partial merge.
+    """
+
+    table = "generation_record"
+
+    def save(self, value: GenerationRecord) -> None:
+        with connection(self.path) as db:
+            db.execute(
+                """INSERT INTO generation_record
+                (id,enrollment_id,communication_type,reason,model_payload,draft_text,created_at,status,
+                 reviewed_at,edited_at,copied_at,sent_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                 ON CONFLICT(id) DO UPDATE SET enrollment_id=excluded.enrollment_id,
+                 communication_type=excluded.communication_type,reason=excluded.reason,
+                 model_payload=excluded.model_payload,draft_text=excluded.draft_text,
+                 created_at=excluded.created_at,status=excluded.status,
+                 reviewed_at=excluded.reviewed_at,edited_at=excluded.edited_at,
+                 copied_at=excluded.copied_at,sent_at=excluded.sent_at""",
+                (
+                    str(value.id),
+                    str(value.enrollment_id),
+                    value.communication_type,
+                    value.reason,
+                    payload_json(value.model_payload),
+                    value.draft_text,
+                    value.created_at.isoformat(),
+                    value.status.value,
+                    *(
+                        item.isoformat() if item else None
+                        for item in (
+                            value.reviewed_at,
+                            value.edited_at,
+                            value.copied_at,
+                            value.sent_at,
+                        )
+                    ),
+                ),
+            )
+
+    def get(self, record_id: UUID) -> GenerationRecord | None:
+        with connection(self.path) as db:
+            row = db.execute(
+                "SELECT * FROM generation_record WHERE id = ?", (str(record_id),)
+            ).fetchone()
+        if row is None:
+            return None
+        return GenerationRecord(
+            UUID(row["id"]),
+            UUID(row["enrollment_id"]),
+            row["communication_type"],
+            row["reason"],
+            json.loads(row["model_payload"]),
+            row["draft_text"],
+            datetime.fromisoformat(row["created_at"]),
+            GenerationStatus(row["status"]),
+            *(
+                datetime.fromisoformat(row[name]) if row[name] else None
+                for name in ("reviewed_at", "edited_at", "copied_at", "sent_at")
+            ),
+        )
+
+    def delete(self, record_id: UUID) -> None:
+        with connection(self.path) as db:
+            db.execute("DELETE FROM generation_record WHERE id = ?", (str(record_id),))
+
+    def transition(
+        self,
+        record_id: UUID,
+        status: GenerationStatus,
+        occurred_at: datetime,
+        draft_text: str | None = None,
+    ) -> None:
+        record = self.get(record_id)
+        if record is None:
+            raise KeyError(record_id)
+        if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+            raise ValueError("occurred_at must be timezone-aware")
+        if draft_text is not None and status is not GenerationStatus.EDITED:
+            raise ValueError("draft_text may only be supplied when transitioning to EDITED")
+        latest_timestamp = max(
+            value
+            for value in (
+                record.created_at,
+                record.reviewed_at,
+                record.edited_at,
+                record.copied_at,
+                record.sent_at,
+            )
+            if value is not None
+        )
+        if occurred_at < latest_timestamp:
+            raise ValueError(
+                "transition timestamp must not be before the latest existing timestamp"
+            )
+        allowed = {
+            GenerationStatus.GENERATED: {
+                GenerationStatus.REVIEWED,
+                GenerationStatus.EDITED,
+                GenerationStatus.DISCARDED,
+            },
+            GenerationStatus.REVIEWED: {
+                GenerationStatus.EDITED,
+                GenerationStatus.COPIED,
+                GenerationStatus.DISCARDED,
+            },
+            GenerationStatus.EDITED: {
+                GenerationStatus.REVIEWED,
+                GenerationStatus.COPIED,
+                GenerationStatus.DISCARDED,
+            },
+            GenerationStatus.COPIED: {GenerationStatus.SENT},
+            GenerationStatus.DISCARDED: set(),
+            GenerationStatus.SENT: set(),
+        }
+        if status not in allowed[record.status]:
+            raise ValueError(
+                f"invalid generation transition: {record.status.value} -> {status.value}"
+            )
+        self.save(
+            GenerationRecord(
+                record.id,
+                record.enrollment_id,
+                record.communication_type,
+                record.reason,
+                record.model_payload,
+                draft_text if draft_text is not None else record.draft_text,
+                record.created_at,
+                status,
+                occurred_at if status is GenerationStatus.REVIEWED else record.reviewed_at,
+                occurred_at if status is GenerationStatus.EDITED else record.edited_at,
+                occurred_at if status is GenerationStatus.COPIED else record.copied_at,
+                occurred_at if status is GenerationStatus.SENT else record.sent_at,
             )
         )
 
