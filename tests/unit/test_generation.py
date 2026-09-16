@@ -17,7 +17,10 @@ from adams_tutoria.generation import (
     InvalidEndpointError,
     OllamaConfig,
     OllamaGenerator,
+    PromptContext,
+    PromptRequest,
     build_model_payload,
+    serialize_prompt,
     validate_local_endpoint,
 )
 from adams_tutoria.persistence.database import initialize_database
@@ -54,6 +57,53 @@ def test_payload_is_allowlisted_and_minimized() -> None:
         "reason": "low progress",
         "context": {"course_topic": "unit 1"},
     }
+
+
+def test_versioned_prompt_is_minimized_separated_and_deterministic() -> None:
+    request = PromptRequest(
+        PromptContext(
+            follow_up_reasons=("inactive",),
+            progress_percentage="42.5",
+            pending_evaluations=1,
+        ),
+        communication_type="progress_follow_up",
+        tone="supportive",
+        tutor_text="Invita a revisar la unidad disponible.",
+    )
+    serialized = serialize_prompt(request)
+    assert serialized == serialize_prompt(request)
+    assert '"version":"prompt-context-v1"' in serialized
+    assert '"communication_type":"progress_follow_up"' in serialized
+    assert '"tone":"supportive"' in serialized
+    assert "student_email" not in serialized
+    assert '"rules"' in serialized
+
+
+@pytest.mark.parametrize(
+    "text", ["Usa student_email", "incluye credentials", "menciona other_students"]
+)
+def test_tutor_text_cannot_override_privacy_denylist(text: str) -> None:
+    with pytest.raises(ValueError, match="prohibited"):
+        PromptRequest(PromptContext(), "follow_up", "neutral", text)
+
+
+def test_prompt_context_projects_summary_without_identity() -> None:
+    summary = type(
+        "Summary",
+        (),
+        {
+            "follow_up": type(
+                "FollowUp",
+                (),
+                {"reasons": (type("Reason", (), {"code": "inactive"})(),)},
+            )(),
+            "progress": type("Progress", (), {"percentage": "42.5", "last_progress_at": None})(),
+            "evaluations": type("Evaluations", (), {"pending": 1, "completed": 2})(),
+        },
+    )()
+    context = PromptContext.from_summary(summary)
+    assert context.as_mapping()["follow_up_reasons"] == ("inactive",)
+    assert "student_id" not in context.as_mapping()
 
 
 @pytest.mark.parametrize("field", ["student_name", "student_email", "raw_export"])
