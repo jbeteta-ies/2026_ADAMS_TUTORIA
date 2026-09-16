@@ -9,6 +9,8 @@ import pytest
 
 from adams_tutoria.domain import Course, Edition, Enrollment, Student
 from adams_tutoria.generation import (
+    DraftGenerationRequest,
+    DraftGenerationService,
     GenerationConfigurationError,
     GenerationRecord,
     GenerationResponseError,
@@ -348,3 +350,56 @@ def test_ollama_rejects_oversized_request_and_invalid_response() -> None:
     )
     with pytest.raises(GenerationResponseError):
         invalid.generate({"reason": "synthetic"})
+
+
+class StubGenerator:
+    def __init__(self, results: list[object]) -> None:
+        self.results = iter(results)
+        self.payloads: list[dict] = []
+
+    def generate(self, payload):
+        self.payloads.append(payload)
+        result = next(self.results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+class MemoryGenerationRepository:
+    def __init__(self) -> None:
+        self.records = []
+
+    def save(self, record) -> None:
+        self.records.append(record)
+
+
+def test_generation_deduplicates_isolates_errors_and_persists_generated_only(
+    tmp_path: Path,
+) -> None:
+    enrollment = _ready(tmp_path / "synthetic-generation.sqlite3")
+    repository = MemoryGenerationRepository()
+    generator = StubGenerator(["Synthetic draft", ValueError("synthetic model failure")])
+    request = DraftGenerationRequest(
+        enrollment,
+        " progress_follow_up ",
+        " low progress ",
+        PromptRequest(PromptContext(progress_percentage="42"), "progress_follow_up", "supportive"),
+    )
+    result = DraftGenerationService(
+        generator, repository, lambda: datetime(2026, 1, 1, tzinfo=UTC)
+    ).generate(
+        [
+            request,
+            request,
+            replace(
+                request,
+                enrollment=Enrollment(uuid4(), enrollment.student, enrollment.edition),
+            ),
+        ]
+    )
+    assert len(result.records) == 1
+    assert result.records[0].status is GenerationStatus.GENERATED
+    assert len(result.failures) == 1
+    assert result.duplicate_enrollment_ids == (enrollment.id,)
+    assert len(repository.records) == 1
+    assert "student_email" not in str(generator.payloads[0])
