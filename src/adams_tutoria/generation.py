@@ -1,7 +1,7 @@
 """Local communication-generation contract with no delivery integration."""
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -296,6 +296,136 @@ class GenerationPort(Protocol):
     """Replaceable application port for generating a draft from a minimized payload."""
 
     def generate(self, payload: Mapping[str, Any]) -> str: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DraftGenerationRequest:
+    """Explicit input for one attempted draft.
+
+    The enrollment is supplied by the caller; this operation does not select
+    recipients or derive a communication recommendation.
+    """
+
+    enrollment: Enrollment
+    communication_type: str
+    reason: str
+    prompt: PromptRequest
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("communication_type", self.communication_type),
+            ("reason", self.reason),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a non-blank string")
+
+
+@dataclass(frozen=True, slots=True)
+class DraftGenerationFailure:
+    """A failure isolated to one enrollment, without retaining its details."""
+
+    enrollment_id: UUID
+    error: str
+
+
+@dataclass(frozen=True, slots=True)
+class DraftGenerationResult:
+    records: tuple[GenerationRecord, ...]
+    failures: tuple[DraftGenerationFailure, ...]
+    duplicate_enrollment_ids: tuple[UUID, ...] = ()
+
+
+def _normalize(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _plain_text(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise GenerationResponseError("generated draft must be non-empty plain text")
+    if len(value) > 16_000:
+        raise GenerationResponseError("generated draft exceeds configured limit")
+    if any(ord(character) < 32 and character not in "\n\r\t" for character in value):
+        raise GenerationResponseError("generated draft contains control characters")
+    if "<html" in value.casefold() or "<script" in value.casefold():
+        raise GenerationResponseError("generated draft must be plain text")
+    return value
+
+
+def _record_context(context: PromptContext) -> dict[str, str]:
+    """Store only the legacy record allowlist projection of prompt context."""
+    parts = [*context.follow_up_reasons]
+    if context.progress_percentage is not None:
+        parts.append(f"progress={context.progress_percentage}")
+    if context.progress_observed_at is not None:
+        parts.append(f"observed_at={context.progress_observed_at}")
+    if context.pending_evaluations:
+        parts.append(f"pending_evaluations={context.pending_evaluations}")
+    if context.completed_evaluations:
+        parts.append(f"completed_evaluations={context.completed_evaluations}")
+    if context.recommendation_reason is not None:
+        parts.append(context.recommendation_reason)
+    return {"progress_summary": "; ".join(parts)} if parts else {}
+
+
+class DraftGenerationService:
+    """Generate and persist at most one local draft per enrollment request.
+
+    There is intentionally no fallback: a failed model call produces an
+    isolated failure and no record.  This service has no delivery side effect.
+    """
+
+    def __init__(
+        self,
+        generator: GenerationPort,
+        repository: "GenerationRepositoryLike",
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._generator = generator
+        self._repository = repository
+        self._clock = clock or (lambda: datetime.now().astimezone())
+
+    def generate(
+        self, requests: tuple[DraftGenerationRequest, ...] | list[DraftGenerationRequest]
+    ) -> DraftGenerationResult:
+        seen: set[UUID] = set()
+        records: list[GenerationRecord] = []
+        failures: list[DraftGenerationFailure] = []
+        duplicates: list[UUID] = []
+        for request in requests:
+            enrollment_id = request.enrollment.id
+            if enrollment_id in seen:
+                duplicates.append(enrollment_id)
+                continue
+            seen.add(enrollment_id)
+            try:
+                communication_type = _normalize(request.communication_type)
+                reason = _normalize(request.reason)
+                prompt = PromptRequest(
+                    request.prompt.context,
+                    communication_type,
+                    _normalize(request.prompt.tone),
+                    request.prompt.tutor_text,
+                    request.prompt.version,
+                )
+                payload = dict(prompt.as_mapping())
+                draft = _plain_text(self._generator.generate(payload))
+                record = GenerationRecord.create(
+                    request.enrollment,
+                    communication_type,
+                    reason,
+                    draft,
+                    self._clock(),
+                    _record_context(prompt.context),
+                )
+                self._repository.save(record)
+                records.append(record)
+            except Exception as exc:
+                failures.append(DraftGenerationFailure(enrollment_id, str(exc)))
+        return DraftGenerationResult(tuple(records), tuple(failures), tuple(duplicates))
+
+
+class GenerationRepositoryLike(Protocol):
+    def save(self, value: GenerationRecord) -> None: ...
 
 
 @dataclass(frozen=True)

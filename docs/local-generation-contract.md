@@ -14,6 +14,21 @@ minimizado y el borrador, en la base operativa local ignorada por Git. El
 borrador puede borrarse explícitamente; no se implementa retención automática
 ni envío automático.
 
+## Operación de generación asistida (#99)
+
+`DraftGenerationService.generate` recibe explícitamente una lista de
+`DraftGenerationRequest`; no selecciona destinatarios ni crea recomendaciones.
+Normaliza espacios de tipo y motivo y deduplica por `Enrollment.id`, con como
+máximo un intento por matrícula en cada solicitud. Para cada entrada construye
+un payload minimizado, invoca el `GenerationPort` inyectado, valida texto no
+vacío, texto plano y el límite de 16.000 caracteres, y guarda un
+`GenerationRecord` en estado `GENERATED`.
+
+Los fallos se aíslan por matrícula: no se persiste un registro fallido ni se
+usa fallback inventado. Una solicitud posterior puede reintentarse de forma
+explícita. La operación no cambia estados posteriores, no envía mensajes y no
+realiza acciones automáticas tras persistir.
+
 ## Contexto y prompt versionado (#98)
 
 `PromptContext` es una proyección inmutable y tipada de un único
