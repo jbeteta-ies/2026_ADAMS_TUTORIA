@@ -191,6 +191,85 @@ def test_persistence_transitions_manual_sent_and_delete(tmp_path: Path) -> None:
     assert repo.get(value.id) is None
 
 
+def test_transition_preserves_audit_metadata(tmp_path: Path) -> None:
+    path = tmp_path / "metadata.sqlite3"
+    enrollment = _ready(path)
+    value = replace(
+        GenerationRecord.create(
+            enrollment,
+            "progress_follow_up",
+            "synthetic reason",
+            "Synthetic draft",
+            datetime(2026, 1, 1, tzinfo=UTC),
+            model_name="synthetic-model",
+            prompt_version="prompt-v2",
+        ),
+        error_code="synthetic-error",
+    )
+    repo = GenerationRepository(path)
+    repo.save(value)
+    before = repo.get(value.id)
+    assert before is not None
+    repo.transition(value.id, GenerationStatus.REVIEWED, datetime(2026, 1, 2, tzinfo=UTC))
+    after = repo.get(value.id)
+    assert after is not None
+    assert after.model_name == before.model_name
+    assert after.prompt_version == before.prompt_version
+    assert after.draft_hash == before.draft_hash
+    assert after.draft_ref == before.draft_ref
+    assert after.error_code == before.error_code
+    assert after.draft_text == before.draft_text
+
+
+def test_generation_text_is_separate_recoverable_and_retained_by_cutoff(tmp_path: Path) -> None:
+    path = tmp_path / "audit.sqlite3"
+    enrollment = _ready(path)
+    value = GenerationRecord.create(
+        enrollment,
+        "follow_up",
+        "synthetic reason",
+        "Synthetic private draft",
+        datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    repo = GenerationRepository(path)
+    repo.save(value)
+    text_path = path.parent / "generation-text" / f"{value.id}.txt"
+    assert text_path.read_text(encoding="utf-8") == value.draft_text
+    with __import__("sqlite3").connect(path) as db:
+        row = db.execute(
+            "SELECT draft_text, draft_hash, draft_ref FROM generation_record WHERE id = ?",
+            (str(value.id),),
+        ).fetchone()
+    assert row[0] in (None, "")
+    assert row[1] == value.draft_sha256
+    assert row[2] == f"generation-text/{value.id}.txt"
+    assert repo.get(value.id).draft_text == value.draft_text  # type: ignore[union-attr]
+    assert repo.retain(datetime(2026, 2, 1, tzinfo=UTC)) == 1
+    assert repo.get(value.id) is None
+    assert not text_path.exists()
+    assert repo.retain(datetime(2026, 2, 1, tzinfo=UTC)) == 0
+
+
+def test_transition_history_contains_only_status_metadata(tmp_path: Path) -> None:
+    path = tmp_path / "history.sqlite3"
+    enrollment = _ready(path)
+    value = GenerationRecord.create(
+        enrollment,
+        "follow_up",
+        "synthetic reason",
+        "Synthetic draft",
+        datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    repo = GenerationRepository(path)
+    repo.save(value)
+    repo.transition(value.id, GenerationStatus.REVIEWED, datetime(2026, 1, 2, tzinfo=UTC))
+    history = repo.history(value.id)
+    assert len(history) == 1
+    assert history[0].from_status is GenerationStatus.GENERATED
+    assert history[0].to_status is GenerationStatus.REVIEWED
+    assert "Synthetic draft" not in str(history[0])
+
+
 def test_re_review_after_edit_is_allowed(tmp_path: Path) -> None:
     path = tmp_path / "re-review.sqlite3"
     enrollment = _ready(path)
@@ -368,9 +447,13 @@ class StubGenerator:
 class MemoryGenerationRepository:
     def __init__(self) -> None:
         self.records = []
+        self.failures = []
 
     def save(self, record) -> None:
         self.records.append(record)
+
+    def record_failure(self, enrollment_id, occurred_at, error_code) -> None:
+        self.failures.append((enrollment_id, occurred_at, error_code))
 
 
 def test_generation_deduplicates_isolates_errors_and_persists_generated_only(
@@ -402,4 +485,5 @@ def test_generation_deduplicates_isolates_errors_and_persists_generated_only(
     assert len(result.failures) == 1
     assert result.duplicate_enrollment_ids == (enrollment.id,)
     assert len(repository.records) == 1
+    assert repository.failures[0][2] == "ValueError"
     assert "student_email" not in str(generator.payloads[0])

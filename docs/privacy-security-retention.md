@@ -119,6 +119,15 @@ contenido de comunicaciones reales.
 
 ## Retención y eliminación
 
+Los fallos de generación registran únicamente `error_code` e instante UTC en
+`generation_failure`; nunca se conserva el texto de la excepción ni PII.
+
+La auditoría de generaciones usa archivos UUID en `data/local/generation-text/`
+(ruta ignorada), con hash y referencia en SQLite, nunca prompts o textos completos.
+La política operativa de referencia es de 30 días desde `created_at`; no existe
+una tarea automática. El operador invoca explícitamente `retain(before)`, que
+borra registro y archivo de manera coordinada e idempotente.
+
 No existe todavía una política automática de retención ni una tarea de
 eliminación. El operador local es responsable de conservar solo el tiempo
 necesario los exports, bases, comunicaciones y backups, y de eliminar también

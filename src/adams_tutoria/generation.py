@@ -1,8 +1,10 @@
 """Local communication-generation contract with no delivery integration."""
 
+import hashlib
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from types import MappingProxyType
@@ -209,6 +211,11 @@ class GenerationRecord:
     edited_at: datetime | None = None
     copied_at: datetime | None = None
     sent_at: datetime | None = None
+    model_name: str = "unknown"
+    prompt_version: str = PROMPT_CONTRACT_VERSION
+    draft_hash: str | None = field(default=None, compare=False)
+    draft_ref: str | None = field(default=None, compare=False)
+    error_code: str | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if (
@@ -217,6 +224,8 @@ class GenerationRecord:
             or not self.draft_text.strip()
         ):
             raise ValueError("communication_type, reason and draft_text must not be blank")
+        if self.model_name.strip() == "" or self.prompt_version.strip() == "":
+            raise ValueError("model_name and prompt_version must not be blank")
         if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
             raise ValueError("created_at must be timezone-aware")
         if set(self.model_payload) - ALLOWED_MODEL_FIELDS:
@@ -256,6 +265,8 @@ class GenerationRecord:
         draft_text: str,
         created_at: datetime,
         context: Mapping[str, str] | None = None,
+        model_name: str = "unknown",
+        prompt_version: str = PROMPT_CONTRACT_VERSION,
     ) -> "GenerationRecord":
         return cls(
             uuid4(),
@@ -265,7 +276,13 @@ class GenerationRecord:
             build_model_payload(communication_type, reason, context),
             draft_text,
             created_at,
+            model_name=model_name,
+            prompt_version=prompt_version,
         )
+
+    @property
+    def draft_sha256(self) -> str:
+        return hashlib.sha256(self.draft_text.encode("utf-8")).hexdigest()
 
 
 def payload_json(payload: Mapping[str, Any]) -> str:
@@ -325,7 +342,12 @@ class DraftGenerationFailure:
     """A failure isolated to one enrollment, without retaining its details."""
 
     enrollment_id: UUID
-    error: str
+    error_code: str
+
+
+def error_code_for(exc: Exception) -> str:
+    """Return a stable, non-sensitive failure code for audit purposes."""
+    return type(exc).__name__
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,6 +371,11 @@ def _plain_text(value: object) -> str:
     if "<html" in value.casefold() or "<script" in value.casefold():
         raise GenerationResponseError("generated draft must be plain text")
     return value
+
+
+def _safe_error(exc: Exception) -> str:
+    """Return a bounded diagnostic without model output or prompt contents."""
+    return type(exc).__name__
 
 
 def _record_context(context: PromptContext) -> dict[str, str]:
@@ -419,16 +446,25 @@ class DraftGenerationService:
                     draft,
                     self._clock(),
                     _record_context(prompt.context),
+                    model_name=getattr(self._generator, "model_name", "unknown"),
+                    prompt_version=prompt.version,
                 )
                 self._repository.save(record)
                 records.append(record)
             except Exception as exc:
-                failures.append(DraftGenerationFailure(enrollment_id, str(exc)))
+                error_code = error_code_for(exc)
+                with suppress(Exception):
+                    self._repository.record_failure(enrollment_id, self._clock(), error_code)
+                failures.append(DraftGenerationFailure(enrollment_id, error_code))
         return DraftGenerationResult(tuple(records), tuple(failures), tuple(duplicates))
 
 
 class GenerationRepositoryLike(Protocol):
     def save(self, value: GenerationRecord) -> None: ...
+
+    def record_failure(
+        self, enrollment_id: UUID, occurred_at: datetime, error_code: str
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -509,6 +545,10 @@ class OllamaGenerator:
     def __init__(self, config: OllamaConfig, transport: HttpTransport | None = None) -> None:
         self.config = config
         self._transport = transport or UrllibTransport()
+
+    @property
+    def model_name(self) -> str:
+        return self.config.model
 
     def generate(self, payload: Mapping[str, Any]) -> str:
         prompt = payload_json(payload)

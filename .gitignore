@@ -67,6 +67,7 @@ db.sqlite3-journal
 data/
 data/private/
 data/local/
+data/local/generation-text/
 data/raw/
 data/processed/
 *.db
