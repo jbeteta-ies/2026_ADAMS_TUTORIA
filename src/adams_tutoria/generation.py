@@ -408,6 +408,9 @@ class DraftGenerationService:
                     request.prompt.version,
                 )
                 payload = dict(prompt.as_mapping())
+                # Keep the port payload made only of JSON-native containers;
+                # PromptRequest intentionally exposes immutable mappings.
+                payload["context"] = dict(prompt.context.as_mapping())
                 draft = _plain_text(self._generator.generate(payload))
                 record = GenerationRecord.create(
                     request.enrollment,
