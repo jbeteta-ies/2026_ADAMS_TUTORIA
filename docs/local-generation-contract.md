@@ -29,6 +29,20 @@ usa fallback inventado. Una solicitud posterior puede reintentarse de forma
 explícita. La operación no cambia estados posteriores, no envía mensajes y no
 realiza acciones automáticas tras persistir.
 
+## Revisión desde el dashboard (#100)
+
+La sección de edición mantiene la selección múltiple bajo una clave propia de la
+edición y crea una solicitud explícita por matrícula. Cada registro se muestra
+por separado con su motivo y la proyección mínima de datos utilizada, sin
+destinatarios ni recomendaciones calculados por la interfaz. Un fallo de
+generación solo marca esa matrícula y no interrumpe las demás.
+
+La regeneración es una acción individual: descarta el registro visible y crea
+otro registro independiente mediante `DraftGenerationService`. La edición se
+guarda con estado `EDITED`; el copiado usa una descarga de texto para facilitar
+la copia manual. `SENT` solo está disponible después de `COPIED` y requiere una
+confirmación manual explícita. No hay botón ni ruta de envío.
+
 ## Contexto y prompt versionado (#98)
 
 `PromptContext` es una proyección inmutable y tipada de un único

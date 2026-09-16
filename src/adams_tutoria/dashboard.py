@@ -28,6 +28,16 @@ from adams_tutoria.domain import (
     Course,
     TutorAction,
 )
+from adams_tutoria.generation import (
+    DraftGenerationRequest,
+    DraftGenerationService,
+    GenerationRecord,
+    GenerationStatus,
+    OllamaConfig,
+    OllamaGenerator,
+    PromptContext,
+    PromptRequest,
+)
 from adams_tutoria.message_templates import MessageContext, render_message
 from adams_tutoria.persistence.database import database_path, initialize_database
 from adams_tutoria.persistence.repositories import (
@@ -35,6 +45,7 @@ from adams_tutoria.persistence.repositories import (
     CourseRepository,
     EditionRepository,
     EnrollmentRepository,
+    GenerationRepository,
     StudentRepository,
     TutorActionRepository,
 )
@@ -235,6 +246,7 @@ def _render_page(course: CourseOption, edition: EditionOption, page: str) -> Non
             for row in visible_rows
         ]
         st.dataframe(table, use_container_width=True, hide_index=True)
+        _render_draft_review(edition, summaries, visible_rows)
         if visible_rows:
             selected_enrollment = st.selectbox(
                 "Matrícula",
@@ -257,6 +269,159 @@ def _render_page(course: CourseOption, edition: EditionOption, page: str) -> Non
                 _render_student_profile(detail.row.enrollment_id)
         else:
             st.info("No hay matrículas que coincidan con los filtros.")
+
+
+def _generation_repository() -> GenerationRepository:
+    """Return the existing local draft repository used by the dashboard."""
+    path = database_path(default_config())
+    initialize_database(path)
+    return GenerationRepository(path)
+
+
+def _dashboard_request(summary, communication_type: str, tutor_text: str) -> DraftGenerationRequest:
+    """Build one explicit request without selecting a recipient or recommendation."""
+    profile = demo_profile(summary.enrollment_id)
+    reasons = tuple(reason.explanation for reason in summary.follow_up.reasons)
+    if not reasons:
+        raise ValueError("La matrícula no tiene un motivo autorizado para generar un borrador.")
+    reason = " · ".join(reasons)
+    prompt = PromptRequest(
+        PromptContext.from_summary(summary, recommendation_reason=reason),
+        communication_type,
+        "neutral",
+        tutor_text or None,
+    )
+    return DraftGenerationRequest(profile.enrollment, communication_type, reason, prompt)
+
+
+def _local_dashboard_generator() -> OllamaGenerator:
+    """Create the explicitly invoked local-only generator; it never sends messages."""
+    return OllamaGenerator(OllamaConfig("local-dashboard-model"))
+
+
+def _record_key(edition_id: str, enrollment_id) -> str:
+    return f"draft:{edition_id}:{enrollment_id}"
+
+
+def _render_draft_review(edition: EditionOption, summaries, rows) -> None:
+    """Render independent draft generation and human review controls."""
+    st.subheader("Borradores asistidos (revisión humana)")
+    st.warning(
+        "IA local: el borrador se genera en el equipo y nunca se envía automáticamente. "
+        "Revisa y copia manualmente en ADAMS si corresponde."
+    )
+    summary_by_id = {summary.enrollment_id: summary for summary in summaries}
+    options = tuple(row.enrollment_id for row in rows)
+    selected = st.multiselect(
+        "Selecciona matrículas para generar borradores independientes",
+        options,
+        format_func=str,
+        key=f"draft-selection:{edition.id}",
+    )
+    communication_type = st.text_input(
+        "Tipo de comunicación", value="seguimiento", key=f"draft-type:{edition.id}"
+    )
+    tutor_text = st.text_area(
+        "Nota opcional del tutor (no sustituye las reglas de privacidad)",
+        key=f"draft-note:{edition.id}",
+    )
+    if st.button("Generar borradores seleccionados", key=f"draft-generate:{edition.id}"):
+        repository = _generation_repository()
+        service = DraftGenerationService(_local_dashboard_generator(), repository)
+        for enrollment_id in selected:
+            try:
+                request = _dashboard_request(
+                    summary_by_id[enrollment_id], communication_type, tutor_text
+                )
+                result = service.generate([request])
+                if result.records:
+                    st.session_state[_record_key(edition.id, enrollment_id)] = str(
+                        result.records[0].id
+                    )
+                else:
+                    st.error(f"No se generó borrador para {enrollment_id}.")
+            except Exception as exc:
+                st.error(f"Falló solo la matrícula {enrollment_id}: {exc}")
+        st.rerun()
+
+    repository = _generation_repository()
+    for enrollment_id in selected:
+        record_id = st.session_state.get(_record_key(edition.id, enrollment_id))
+        if record_id is None:
+            continue
+        record = repository.get(UUID(record_id))
+        if record is not None:
+            _render_one_draft(
+                edition, enrollment_id, record, summary_by_id[enrollment_id], repository
+            )
+
+
+def _render_one_draft(
+    edition, enrollment_id, record: GenerationRecord, summary, repository
+) -> None:
+    """Render controls for exactly one record, scoped by edition and enrollment."""
+    key = _record_key(edition.id, enrollment_id)
+    st.markdown(f"### Matrícula {enrollment_id}")
+    st.caption(f"Motivo: {record.reason}")
+    st.caption(
+        "Datos usados: contexto minimizado de seguimiento y evaluaciones; "
+        "sin contacto ni IDs externos."
+    )
+    edited = st.text_area("Borrador", value=record.draft_text, key=f"draft-text:{key}", height=180)
+    if record.status not in (
+        GenerationStatus.COPIED,
+        GenerationStatus.SENT,
+        GenerationStatus.DISCARDED,
+    ):
+        if st.button("Guardar edición", key=f"draft-edit:{key}"):
+            repository.transition(record.id, GenerationStatus.EDITED, datetime.now(UTC), edited)
+            st.rerun()
+        if st.button("Marcar revisado", key=f"draft-review:{key}"):
+            repository.transition(record.id, GenerationStatus.REVIEWED, datetime.now(UTC))
+            st.rerun()
+        if st.button("Regenerar este borrador", key=f"draft-regenerate:{key}"):
+            try:
+                repository.transition(record.id, GenerationStatus.DISCARDED, datetime.now(UTC))
+                request = _dashboard_request(summary, record.communication_type, "")
+                result = DraftGenerationService(_local_dashboard_generator(), repository).generate(
+                    [request]
+                )
+                if result.records:
+                    st.session_state[key] = str(result.records[0].id)
+                else:
+                    st.error(f"No se pudo regenerar {enrollment_id}.")
+            except Exception as exc:
+                st.error(f"Regeneración fallida solo para {enrollment_id}: {exc}")
+            st.rerun()
+        if st.button("Descartar", key=f"draft-discard:{key}"):
+            repository.transition(record.id, GenerationStatus.DISCARDED, datetime.now(UTC))
+            st.rerun()
+    if record.status in (
+        GenerationStatus.REVIEWED,
+        GenerationStatus.EDITED,
+        GenerationStatus.COPIED,
+    ):
+        st.download_button(
+            "Copiar manualmente (descargar texto)",
+            record.draft_text,
+            file_name=f"borrador-{enrollment_id}.txt",
+            mime="text/plain",
+            key=f"draft-copy:{key}",
+        )
+        if record.status is not GenerationStatus.COPIED and st.button(
+            "Registrar COPIED (ya copié manualmente)", key=f"draft-copied:{key}"
+        ):
+            repository.transition(record.id, GenerationStatus.COPIED, datetime.now(UTC))
+            st.rerun()
+    if record.status is GenerationStatus.COPIED and st.button(
+        "Registrar SENT (solo confirmé envío manual)", key=f"draft-sent:{key}"
+    ):
+        repository.transition(record.id, GenerationStatus.SENT, datetime.now(UTC))
+        st.rerun()
+    if record.status is GenerationStatus.SENT:
+        st.success("SENT registrado únicamente tras una acción manual externa del tutor.")
+    if record.status is GenerationStatus.DISCARDED:
+        st.info("Borrador descartado; no se muestra como mensaje activo.")
 
 
 def _assistant_course(option: CourseOption) -> Course:
