@@ -105,6 +105,12 @@ CREATE TABLE IF NOT EXISTS enrollment_history (
     event_type TEXT NOT NULL, active INTEGER NOT NULL, external_id TEXT,
     occurred_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS generation_record (
+    id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
+    communication_type TEXT NOT NULL, reason TEXT NOT NULL, model_payload TEXT NOT NULL,
+    draft_text TEXT NOT NULL, created_at TEXT NOT NULL, status TEXT NOT NULL,
+    reviewed_at TEXT, edited_at TEXT, copied_at TEXT, sent_at TEXT
+);
 """
 
 COURSE_ADDITIONS = {

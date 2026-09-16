@@ -95,6 +95,7 @@ def test_initialization_is_idempotent_and_has_all_tables(tmp_path: Path) -> None
             "enrollment_history",
             "evaluation_external_identity",
             "evaluation_history",
+            "generation_record",
         }
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
