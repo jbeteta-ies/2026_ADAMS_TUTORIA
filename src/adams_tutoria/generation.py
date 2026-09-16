@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from types import MappingProxyType
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -12,6 +13,7 @@ from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
 
 from .domain import Enrollment
+from .summary import EnrollmentSummary
 
 
 class GenerationStatus(Enum):
@@ -38,6 +40,142 @@ PROHIBITED_MODEL_FIELDS = frozenset(
         "full_database_record",
     }
 )
+
+PROMPT_CONTRACT_VERSION = "prompt-context-v1"
+NON_INVENTION_RULES = (
+    "Usa únicamente los datos del contexto autorizado y la nota del tutor.",
+    "No inventes nombres, identificadores, fechas, resultados, progreso ni acciones.",
+    "Si falta un dato necesario, indícalo explícitamente y no lo completes.",
+    "No reveles ni solicites credenciales, emails, IDs externos, informes crudos u otros alumnos.",
+)
+_PROMPT_DENYLIST = frozenset(
+    PROHIBITED_MODEL_FIELDS
+    | {
+        "student_id",
+        "enrollment_id",
+        "edition_id",
+        "other_students",
+        "internal_notes",
+        "notes",
+        "credentials",
+        "email",
+        "external_id",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PromptContext:
+    """Small, immutable projection of one enrollment for prompt construction.
+
+    This is deliberately a semantic projection, not a serialization of domain
+    objects.  It contains no identity, contact data, raw report, or free-form
+    internal note.
+    """
+
+    follow_up_reasons: tuple[str, ...] = ()
+    progress_percentage: str | None = None
+    progress_observed_at: str | None = None
+    pending_evaluations: int = 0
+    completed_evaluations: int = 0
+    recommendation_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if any(not isinstance(item, str) or not item.strip() for item in self.follow_up_reasons):
+            raise ValueError("follow_up_reasons must contain non-blank strings")
+        for name, value in (
+            ("progress_percentage", self.progress_percentage),
+            ("progress_observed_at", self.progress_observed_at),
+            ("recommendation_reason", self.recommendation_reason),
+        ):
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"{name} must be blank or a non-blank string")
+        if self.pending_evaluations < 0 or self.completed_evaluations < 0:
+            raise ValueError("evaluation counts must not be negative")
+
+    @classmethod
+    def from_summary(
+        cls, summary: EnrollmentSummary, recommendation_reason: str | None = None
+    ) -> "PromptContext":
+        """Project an existing ``EnrollmentSummary`` without copying its identity."""
+
+        reasons = tuple(reason.code for reason in summary.follow_up.reasons)
+        progress = summary.progress
+        return cls(
+            follow_up_reasons=reasons,
+            progress_percentage=None if progress.percentage is None else str(progress.percentage),
+            progress_observed_at=None
+            if progress.last_progress_at is None
+            else progress.last_progress_at.isoformat(),
+            pending_evaluations=summary.evaluations.pending,
+            completed_evaluations=summary.evaluations.completed,
+            recommendation_reason=recommendation_reason,
+        )
+
+    def as_mapping(self) -> Mapping[str, Any]:
+        values = {
+            "follow_up_reasons": self.follow_up_reasons,
+            "progress_percentage": self.progress_percentage,
+            "progress_observed_at": self.progress_observed_at,
+            "pending_evaluations": self.pending_evaluations,
+            "completed_evaluations": self.completed_evaluations,
+            "recommendation_reason": self.recommendation_reason,
+        }
+        return MappingProxyType(values)
+
+
+@dataclass(frozen=True, slots=True)
+class PromptRequest:
+    """Versioned, local prompt contract; no transport or delivery behavior."""
+
+    context: PromptContext
+    communication_type: str
+    tone: str
+    tutor_text: str | None = None
+    version: str = PROMPT_CONTRACT_VERSION
+
+    def __post_init__(self) -> None:
+        for name, value in (("communication_type", self.communication_type), ("tone", self.tone)):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{name} must be a non-blank string")
+        if self.version != PROMPT_CONTRACT_VERSION:
+            raise ValueError("unsupported prompt contract version")
+        if self.tutor_text is not None:
+            if not isinstance(self.tutor_text, str) or len(self.tutor_text) > 2000:
+                raise ValueError("tutor_text must be at most 2000 characters")
+            lowered = self.tutor_text.casefold()
+            if any(term.casefold() in lowered for term in _PROMPT_DENYLIST):
+                raise ValueError("tutor_text contains a prohibited field")
+
+    def as_mapping(self) -> Mapping[str, Any]:
+        return MappingProxyType(
+            {
+                "version": self.version,
+                "communication_type": self.communication_type,
+                "tone": self.tone,
+                "context": self.context.as_mapping(),
+                "tutor_text": self.tutor_text,
+                "rules": NON_INVENTION_RULES,
+            }
+        )
+
+
+def serialize_prompt(request: PromptRequest) -> str:
+    """Serialize a prompt deterministically for a local model or test fixture."""
+
+    return json.dumps(
+        {
+            "version": request.version,
+            "communication_type": request.communication_type,
+            "tone": request.tone,
+            "context": dict(request.context.as_mapping()),
+            "tutor_text": request.tutor_text,
+            "rules": list(NON_INVENTION_RULES),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def build_model_payload(
