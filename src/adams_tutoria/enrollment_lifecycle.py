@@ -291,8 +291,9 @@ class EnrollmentLifecycleService:
             student_id = UUID(student_row["id"])
             name = student_evidence.name.strip() if student_evidence.name else None
             email = student_evidence.email
-            if (name is not None and name != student_row["full_name"]) or (
-                email is not None and email != (student_row["email"] or "")
+            if candidate.action != "snapshot" and (
+                (name is not None and name != student_row["full_name"])
+                or (email is not None and email != (student_row["email"] or ""))
             ):
                 return self._change(
                     db,
@@ -305,7 +306,11 @@ class EnrollmentLifecycleService:
                     "Candidate identity attributes conflict with stored identity",
                 )
             updates = {}
-            if not student_row["full_name"] and name:
+            if (
+                name is not None
+                and name != student_row["full_name"]
+                and candidate.action == "snapshot"
+            ):
                 updates["full_name"] = name
             if not student_row["email"] and email:
                 updates["email"] = email
@@ -403,7 +408,7 @@ class EnrollmentLifecycleService:
                 "SELECT active FROM enrollment_state WHERE enrollment_id=?", (str(enrollment_id),)
             ).fetchone()
             active = bool(state["active"]) if state else True
-            explicit_reactivation = candidate.action == "reactivate"
+            explicit_reactivation = candidate.action in ("reactivate", "snapshot")
             if not active and not explicit_reactivation:
                 return self._change(
                     db,

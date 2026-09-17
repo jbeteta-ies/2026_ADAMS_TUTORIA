@@ -11,8 +11,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
-from uuid import uuid4
+from typing import Any, BinaryIO, cast
+from uuid import UUID, uuid4
 
 from adams_tutoria.domain import (
     ImportBatch,
@@ -20,7 +22,12 @@ from adams_tutoria.domain import (
     ImportChangeType,
     ImportSourceType,
 )
-from adams_tutoria.excel_contract import EvaluationRecord, ProgressRecord
+from adams_tutoria.excel_contract import (
+    EnrollmentSnapshotAdapter,
+    EnrollmentSnapshotRecord,
+    EvaluationRecord,
+    ProgressRecord,
+)
 from adams_tutoria.import_contract import ImportCandidate, ImportResult
 from adams_tutoria.import_pipeline import ImportDatasetAdapter
 from adams_tutoria.import_review import (
@@ -63,10 +70,11 @@ class ImportOperationService:
 
     @staticmethod
     def read_xlsx(
-        path: str | Path, *, config: TabularImportConfig | None = None
+        path: str | Path | BinaryIO, *, config: TabularImportConfig | None = None
     ) -> ImportResult[TabularRow]:
         """Read only XLSX input at this operation boundary."""
-        if Path(path).suffix.lower() != ".xlsx":
+        suffix = Path(path).suffix.lower() if isinstance(path, (str, Path)) else ".xlsx"
+        if suffix != ".xlsx":
             raise ValueError("the local operation accepts only .xlsx files")
         return read_tabular(path, config=config)
 
@@ -97,6 +105,31 @@ class ImportOperationService:
             created_at=created_at,
         )
 
+    def prepare_snapshot_xlsx(
+        self, path: str | Path | BinaryIO, *, edition_id: str, created_at: datetime
+    ) -> PreparedImport:
+        """Adapt a complete XLSX snapshot for an already selected edition."""
+        source = _uploaded_bytes(path)
+        result = self.read_xlsx(source)
+        adapted = EnrollmentSnapshotAdapter(source_name="local-snapshot").adapt(result.accepted)
+        records: tuple[EnrollmentSnapshotRecord, ...] = adapted.accepted
+        from adams_tutoria.enrollment_snapshot import EnrollmentSnapshotService
+
+        candidates = EnrollmentSnapshotService(self.database_path).candidates(
+            records, UUID(edition_id)
+        )
+        return self.preview(
+            "local-snapshot",
+            candidates=candidates,
+            rejected_rows=len(result.rejected) + len(adapted.rejected),
+            context=edition_id,
+            source_kind="xlsx",
+            source_fingerprint=fingerprint_file(source),
+            created_at=created_at,
+            scope_type="full",
+            scope_reference=edition_id,
+        )
+
     def preview(
         self,
         source_name: str,
@@ -110,6 +143,8 @@ class ImportOperationService:
         source_fingerprint: str | None = None,
         source_kind: str = "other",
         created_at: datetime,
+        scope_type: str = "partial",
+        scope_reference: str | None = None,
     ) -> PreparedImport:
         """Create a safe preview; no file or input row is retained."""
         candidates, progress, evaluations = tuple(candidates), tuple(progress), tuple(evaluations)
@@ -126,6 +161,8 @@ class ImportOperationService:
             accepted_count=total - rejected_rows,
             rejected_count=rejected_rows,
             warning_count=warnings,
+            scope_type=scope_type,
+            scope_reference=scope_reference,
         )
         preview = self.review.preview(
             batch,
@@ -159,13 +196,30 @@ class ImportOperationService:
         )
 
 
-def fingerprint_file(path: str | Path) -> str:
+def fingerprint_file(path: str | Path | BinaryIO) -> str:
     """Return a digest without retaining the source content."""
     digest = sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+    if isinstance(path, (str, Path)):
+        with Path(path).open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    else:
+        position = path.tell()
+        path.seek(0)
+        for chunk in iter(lambda: path.read(1024 * 1024), b""):
             digest.update(chunk)
+        path.seek(position)
     return digest.hexdigest()
+
+
+def _uploaded_bytes(source: str | Path | BinaryIO) -> str | Path | BinaryIO:
+    """Normalize Streamlit's UploadedFile without retaining an uploaded file."""
+    if isinstance(source, (str, Path)):
+        return source
+    if hasattr(source, "getvalue"):
+        getvalue = cast(Any, source).getvalue
+        return BytesIO(getvalue())
+    return source
 
 
 def _source_type(kind: str) -> ImportSourceType:

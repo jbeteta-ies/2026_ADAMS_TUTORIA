@@ -8,6 +8,7 @@ import csv
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 from openpyxl import load_workbook
 
@@ -41,7 +42,7 @@ class TabularImportConfig:
 
 
 def read_tabular(
-    path: str | Path,
+    path: str | Path | BinaryIO,
     *,
     config: TabularImportConfig | None = None,
 ) -> ImportResult[TabularRow]:
@@ -52,18 +53,21 @@ def read_tabular(
     a physical line number for CSV records that contain embedded newlines.
     """
 
-    source = Path(path)
-    suffix = source.suffix.lower()
+    source = Path(path) if isinstance(path, (str, Path)) else None
+    suffix = source.suffix.lower() if source else ".xlsx"
     options = config or TabularImportConfig()
     if suffix == ".csv":
+        if source is None:
+            raise ValueError("CSV input must be a filesystem path")
         rows = _read_csv(source, options)
         source_kind = "csv"
     elif suffix == ".xlsx":
-        rows = _read_xlsx(source)
+        rows = _read_xlsx(path)
         source_kind = "xlsx"
     else:
         raise ValueError("only .csv and .xlsx files are supported")
-    return _validate_rows(source.name, source_kind, rows, options)
+    source_name = source.name if source else "uploaded.xlsx"
+    return _validate_rows(source_name, source_kind, rows, options)
 
 
 def import_tabular(
@@ -81,7 +85,7 @@ def _read_csv(path: Path, config: TabularImportConfig) -> Iterator[Sequence[obje
         yield from csv.reader(handle, delimiter=config.delimiter)
 
 
-def _read_xlsx(path: Path) -> Iterator[Sequence[object]]:
+def _read_xlsx(path: str | Path | BinaryIO) -> Iterator[Sequence[object]]:
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
         worksheet = workbook.active
