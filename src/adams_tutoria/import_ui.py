@@ -12,7 +12,9 @@ from pathlib import Path
 
 import streamlit as st
 
+from adams_tutoria.domain import ImportChangeType
 from adams_tutoria.import_operation import ImportOperationService, PreparedImport
+from adams_tutoria.import_review import ImportPreview
 
 IMPORT_TYPES = ("Alumnos y matrículas", "Progreso", "Evaluaciones")
 
@@ -25,6 +27,7 @@ def render_import_operation(
     st.title("Importación local")
     st.caption("Fuente local · sin conexión remota · revisión total antes de aplicar")
     import_type = st.selectbox("Tipo de importación", IMPORT_TYPES)
+    edition_id = _render_edition_selection(service)
     uploaded = st.file_uploader("Fuente local", type=["xlsx"], key="import_source")
     st.info(
         f"Tipo seleccionado: {import_type}. La aplicación no presupone columnas ADAMS; "
@@ -39,6 +42,14 @@ def render_import_operation(
         "No se generan cursos ni ediciones automáticamente."
     )
     _render_history(service)
+    if prepared is None and import_type == "Alumnos y matrículas":
+        try:
+            prepared = service.prepare_snapshot_xlsx(
+                uploaded, edition_id=edition_id, created_at=datetime.now(UTC)
+            )
+        except Exception as error:
+            st.error(f"No se pudo preparar el snapshot: {type(error).__name__}")
+            return None
     if prepared is None:
         st.caption("La UI presenta el punto de operación; el adaptador entrega el PreparedImport.")
         return None
@@ -53,7 +64,7 @@ def render_import_operation(
                 prepared,
                 operator_reference="local-operator",
                 timestamp=datetime.now(UTC),
-                idempotency_key=f"ui-{prepared.preview.preview_id}",
+                idempotency_key=f"snapshot-{prepared.batch.source_fingerprint}-{edition_id}",
             )
         except Exception as error:
             st.error(f"No se pudo confirmar la importación: {type(error).__name__}")
@@ -66,13 +77,44 @@ def render_import_operation(
     return prepared
 
 
+def _render_edition_selection(service: ImportOperationService) -> str:
+    """Persist the operator's existing course/edition selection in session state."""
+    try:
+        from adams_tutoria.persistence.database import connection
+
+        with connection(Path(service.database_path)) as db:
+            rows = db.execute(
+                "SELECT e.id, c.name || ' · ' || e.label AS label "
+                "FROM edition e JOIN course c ON c.id=e.course_id ORDER BY c.name, e.label"
+            ).fetchall()
+    except Exception:
+        rows = []
+    if not rows:
+        st.warning("Debe existir al menos una edición antes de importar un snapshot.")
+        return ""
+    options = {row["id"]: row["label"] for row in rows}
+    selected = st.selectbox(
+        "Curso y edición existente",
+        list(options),
+        format_func=lambda value: options[value],
+        key="snapshot_edition_id",
+    )
+    return selected
+
+
 def _render_preview(prepared: PreparedImport) -> None:
     preview = prepared.preview
     st.subheader("Preview")
     st.write(
         {
-            "cambios": len(preview.changes),
+            "altas": _count_operations(preview, "created"),
+            "cambios de nombre": _count_name_changes(preview),
+            "bajas lógicas": _count_operations(preview, "absent"),
+            "reactivaciones": _count_operations(preview, "reactivated"),
+            "sin cambios": _count_operations(preview, "unchanged"),
+            "conflictos": _count_types(preview, ImportChangeType.CONFLICT),
             "rechazadas": prepared.rejected_rows,
+            "errores": _count_types(preview, ImportChangeType.ERROR),
             "advertencias": prepared.warnings,
         }
     )
@@ -81,6 +123,7 @@ def _render_preview(prepared: PreparedImport) -> None:
             {
                 "entidad": c.entity,
                 "resultado": c.change_type.value,
+                "operación": _operation_label(c.operation),
                 "fila": c.source_row_number,
                 "código": c.diagnostic_code,
             }
@@ -89,6 +132,46 @@ def _render_preview(prepared: PreparedImport) -> None:
         hide_index=True,
         use_container_width=True,
     )
+
+
+def _count_operations(preview: ImportPreview, operation: str, *, entity: str | None = None) -> int:
+    changes = preview.changes
+    return sum(
+        1
+        for change in changes
+        if change.operation == operation and (entity is None or change.entity == entity)
+    )
+
+
+def _count_name_changes(preview: ImportPreview) -> int:
+    """Count snapshot name changes emitted for either affected entity type.
+
+    The lifecycle records a snapshot rename on the student and returns the
+    resulting enrollment operation in the preview.  Both representations are
+    valid for the UI counter; the enrollment is not a different operation.
+    """
+    return sum(
+        1
+        for change in preview.changes
+        if change.operation == "modified" and change.entity in {"student", "enrollment"}
+    )
+
+
+def _count_types(preview: ImportPreview, change_type: ImportChangeType) -> int:
+    return sum(1 for change in preview.changes if change.change_type == change_type)
+
+
+def _operation_label(operation: str | None) -> str:
+    return {
+        "created": "alta",
+        "modified": "cambio",
+        "absent": "baja lógica",
+        "reactivated": "reactivación",
+        "unchanged": "sin cambios",
+        "conflict": "conflicto",
+        "rejected": "rechazo",
+        "error": "error",
+    }.get(operation or "", operation or "desconocido")
 
 
 def _render_history(service: ImportOperationService) -> None:
@@ -109,7 +192,11 @@ def _render_history(service: ImportOperationService) -> None:
 
 
 def main() -> None:
-    service = ImportOperationService("data/local/adams_tutoria.sqlite3")
+    database = Path("data/local/adams_tutoria.sqlite3")
+    from adams_tutoria.persistence.database import initialize_database
+
+    initialize_database(database)
+    service = ImportOperationService(database)
     render_import_operation(service)
 
 

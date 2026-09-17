@@ -42,6 +42,33 @@ class StudentExcelColumns:
 
 
 @dataclass(frozen=True, slots=True)
+class EnrollmentSnapshotColumns:
+    """Columns of the complete student/enrollment snapshot.
+
+    These are the deliberately small application contract for this import.  A
+    course/edition is selected by the operator, rather than read from the
+    workbook.  Other workbook columns are consequently ignored at the edge.
+    """
+
+    user: str = "Usuario"
+    surnames: str = "Apellidos"
+    given_name: str = "Nombre"
+
+    def __post_init__(self) -> None:
+        if any(not value.strip() for value in (self.user, self.surnames, self.given_name)):
+            raise ValueError("snapshot column names must not be blank")
+
+
+@dataclass(frozen=True, slots=True)
+class EnrollmentSnapshotRecord:
+    """One normalized row from a complete edition snapshot."""
+
+    dni: str
+    full_name: str
+    provenance: Provenance
+
+
+@dataclass(frozen=True, slots=True)
 class ProgressExcelColumns:
     """Explicit mapping for an evolution/progress sheet."""
 
@@ -232,6 +259,41 @@ class StudentExcelAdapter(_Adapter[StudentRecord]):
             provenance,
             _raw(row, c.raw_columns),
         )
+
+
+class EnrollmentSnapshotAdapter(_Adapter[EnrollmentSnapshotRecord]):
+    """Adapt the complete snapshot contract without retaining ignored fields."""
+
+    def __init__(
+        self, columns: EnrollmentSnapshotColumns | None = None, *, source_name: str = "excel-input"
+    ) -> None:
+        self.columns = columns or EnrollmentSnapshotColumns()
+        super().__init__(source_name=source_name, source_kind="xlsx")
+
+    def _record(self, row: Row, provenance: Provenance) -> EnrollmentSnapshotRecord:
+        c = self.columns
+        dni = _snapshot_text(row, c.user)
+        surnames = _text(row, c.surnames)
+        given_name = _text(row, c.given_name)
+        if not dni or not surnames or not given_name:
+            raise ValueError("snapshot requires Usuario, Apellidos and Nombre")
+        return EnrollmentSnapshotRecord(
+            dni, " ".join(f"{surnames} {given_name}".split()), provenance
+        )
+
+    def adapt(self, rows: Iterable[object]) -> ImportResult[EnrollmentSnapshotRecord]:
+        return super().adapt(rows)
+
+
+def _snapshot_text(row: Row, column: str) -> str | None:
+    value = row.get(column)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+        return str(value).strip() or None
+    raise ValueError("snapshot text value is unsafe")
 
 
 class ProgressExcelAdapter(_Adapter[ProgressRecord]):
