@@ -16,8 +16,9 @@ con el contrato de importación; los estados terminales (`applied`, `rejected` y
 Las bajas no eliminan filas. El estado actual se mantiene en
 `enrollment_state` y cada evento se añade a `student_history` o
 `enrollment_history`; `import_batch_change` proporciona el vínculo operativo
-con el lote. La reactivación solo ocurre cuando el candidato lleva
-`action="reactivate"`.
+con el lote. En importaciones generales la reactivación requiere
+`action="reactivate"`; los snapshots completos reactivan automáticamente la
+matrícula que vuelve a aparecer.
 
 En un lote `full`, una clave compuesta determinable a partir del candidato se
 registra como presente antes de validar sus atributos. Por eso un conflicto
@@ -55,3 +56,24 @@ manualmente, la convierte en candidatos de matrícula y delega toda la
 resolución y persistencia en `EnrollmentLifecycleService`. Una edición ausente
 falla antes de escribir; los registros sin identidad estable no se emparejan
 por nombre o correo.
+
+## Snapshot completo por edición
+
+`prepare_snapshot_xlsx` recibe un XLSX completo y la edición existente elegida
+por la persona operadora. Siempre crea un lote con `scope_type=full` y esa
+edición como `scope_reference`; no existe una ruta de snapshot parcial ni se
+lee la edición desde el archivo. `Usuario` (DNI) es la identidad estable y
+`full_name` se normaliza como `Apellidos + Nombre`.
+
+El preview separa altas, cambios de nombre, bajas lógicas, reactivaciones, sin
+cambios y rechazos o conflictos. Las filas ausentes solo desactivan matrículas
+de la edición seleccionada. Una aparición posterior reactiva la misma fila de
+matrícula, conservando sus IDs; nunca se borran físicamente alumnos,
+matrículas ni histórico. Las columnas no pertenecientes al contrato se
+ignoran.
+
+La confirmación requiere revisión explícita y aplica el snapshot completo en
+una única transacción. La clave formada por la huella del archivo y la edición
+evita repetir el mismo lote: repetir preparación o confirmación no crea
+duplicados ni nuevos eventos espurios. Si falla cualquier parte, SQLite revierte
+el lote completo; solo queda, cuando es posible, un registro seguro del fallo.

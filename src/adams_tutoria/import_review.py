@@ -32,6 +32,7 @@ class PreviewChange:
     source_identifier: str | None = None
     diagnostic_code: str | None = None
     diagnostic_message: str | None = None
+    operation: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,6 +263,7 @@ class ImportReviewService:
                     row[4],
                     row[5],
                     row[6],
+                    kind,
                 )
             )
         return tuple(changes)

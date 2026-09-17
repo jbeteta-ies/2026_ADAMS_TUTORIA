@@ -108,6 +108,16 @@ contain only a selected set of short scalar values, never a complete row.
 These contracts do not create courses or editions and do not persist source
 files or rows.
 
+## Complete edition snapshot
+
+The snapshot adapter expects `Usuario`, `Apellidos`, and `Nombre` (configurable
+at the edge). The operator selects an existing edition; `Usuario` is the stable
+DNI identity and the two name columns form normalized `full_name`. Unknown
+columns, including `Provincia`, `Grupo`, and `Entradas`, are ignored. A full
+scope deactivates absent enrollments only in that edition and reactivates the
+same enrollment when it reappears. Preview, explicit confirmation, one atomic
+transaction, and a stable fingerprint/edition idempotency key protect replay.
+
 ## Evolution application
 
 `ProgressRecord` is normalized evidence only. `ProgressImportService` applies it
