@@ -30,6 +30,34 @@ No se inspecciona, copia ni describe ninguna fila, nombre, identificador,
 captura, base de datos o XLSX operativo. La existencia local de archivos bajo
 `data/private/` no se trata como evidencia autorizada del contrato del formato.
 
+## Vía de autorización y custodia de evidencia
+
+La evidencia necesaria para desbloquear una implementación funcional debe
+seguir una vía de autorización explícita, separada del repositorio:
+
+1. El responsable funcional solicita una muestra mínima del formato y define
+   qué campos son necesarios para confirmar el contrato.
+2. El propietario autorizado de la fuente confirma que la muestra puede ser
+   utilizada para análisis técnico y que ha sido anonimizada o sintetizada
+   suficientemente antes de compartirla con el equipo de desarrollo.
+3. La muestra autorizada se entrega únicamente por el canal local o privado
+   aprobado para datos operativos. No se copia a Git, Issues, Pull Requests,
+   logs, capturas ni documentación versionada.
+4. La custodia permanece en almacenamiento local ignorado, con acceso limitado
+   al personal autorizado. El repositorio conserva solo conclusiones
+   estructurales, códigos de diagnóstico y decisiones aprobadas, nunca filas,
+   nombres, identificadores, valores personales ni el archivo fuente.
+5. Tras la revisión, se registra una referencia no sensible a la evidencia
+   (por ejemplo, fecha de revisión, responsable y versión del contrato), sin
+   incluir la muestra ni permitir reconstruirla. La retención y eliminación de
+   la copia local siguen la política operativa aplicable.
+
+Una descripción o decisión aprobada por sí sola no prueba que el XLSX real
+cumpla el contrato. Si no puede obtenerse una muestra autorizada, debe
+documentarse la ausencia de evidencia y mantenerse el bloqueo; no se permite
+suplirla con una exportación local no autorizada ni con hipótesis sobre
+cabeceras o posiciones.
+
 ## Hechos confirmados por el repositorio
 
 ### Capacidad estructural del XLSX
@@ -198,6 +226,44 @@ nodo, fecha de importación y campos separados para páginas visualizadas y G.
 La entidad exacta, nombres de columnas, restricciones, migración y relación
 con `ContentNode` requieren aprobación de diseño después de confirmar el
 formato real. Este documento no crea nada de ello.
+
+### Matriz de decisiones pendientes
+
+| Decisión | Hecho disponible | Decisión requerida | Evidencia/autorización necesaria | Estado |
+| --- | --- | --- | --- | --- |
+| Identidad y resolución de matrícula | #110 exige una identidad estable y una matrícula existente | Confirmar la cabecera o combinación que vincula cada bloque con `Enrollment` | Muestra autorizada y aprobación del contrato de identidad | Pendiente; bloquea implementación |
+| Bloques de alumno | El lector genérico puede devolver filas, pero no conoce bloques ADAMS | Confirmar inicio, fin, repetición de cabeceras y asociación de filas | Muestra autorizada del formato, sin PII | Pendiente; bloquea parser |
+| Hoja y columnas | No hay nombres oficiales confirmados en el repositorio | Confirmar hoja, cabeceras, posiciones y anchura | Contrato estructural autorizado | Pendiente; bloquea mapeos |
+| Vacíos y duplicados | El dominio no define su semántica de origen | Decidir tratamiento de vacío, cero, sentinelas, fórmulas y repetición | Ejemplos sintéticos representativos o evidencia autorizada | Pendiente; bloquea normalización |
+| Columna G | Se requiere separarla del progreso de páginas | Confirmar nombre, unidad, escala y granularidad | Evidencia autorizada y decisión funcional | Pendiente; bloquea persistencia |
+| Progreso de páginas | El dominio acepta 0--100, pero la fuente no está confirmada | Confirmar semántica, unidad y rango de la fuente | Contrato autorizado | Pendiente; bloquea validación funcional |
+| Contenido y jerarquía | `ContentNode` soporta módulos, submódulos y elementos | Confirmar identificadores, títulos y jerarquía importables | Catálogo/contrato autorizado; no inferencia por título | Pendiente; bloquea creación de estructura |
+| Estado actual frente a histórico | `ContentProgressSnapshot` es fechado y append-only | Aprobar entidad/tabla separada para upsert actual, ausencias conservadoras y última actualización | Decisión arquitectónica explícita | Pendiente; bloquea migración |
+| Fecha de actualización | El plan propone la fecha de importación | Confirmar que no se usará una fecha inventada del informe | Aprobación del contrato funcional | Pendiente; bloquea modelo final |
+| Confirmación y transacción | El plan exige preview, confirmación e idempotencia | Confirmar el límite exacto entre preview y aplicación | Decisión de flujo aprobada | Pendiente; bloquea servicio |
+
+Ninguna fila de esta matriz autoriza por sí misma una implementación. Las
+decisiones que afecten arquitectura, persistencia o semántica deben aprobarse
+después de recibir evidencia autorizada; hasta entonces permanecen pendientes.
+
+## Estado factual del PR #117
+
+La consulta factual actual de GitHub muestra que el PR #117 está **MERGED**
+(merge registrado el 17 de septiembre de 2026), con un único commit que añade
+este documento. No constan reviews publicados, comentarios del PR ni checks en
+el estado consultado. Por tanto, el texto del cuerpo del PR que afirma
+`READY FOR HUMAN REVIEW` y `APPROVE FOR HUMAN REVIEW` no constituye evidencia
+de una validación o revisión independiente registrada.
+
+No se ha encontrado en la información pública consultada un registro que
+permita afirmar literalmente los estados `NOT READY` del Validator o
+`REQUEST CHANGES` del Reviewer para el PR #117. Esos estados no deben
+inventarse ni atribuirse retrospectivamente. La conclusión documental segura
+es que el expediente publicado carece de evidencia verificable de esas dos
+decisiones y que el PR, al estar ya fusionado, no puede tratarse ahora como un
+PR abierto pendiente de validación/revisión. Esta discrepancia debe quedar
+resuelta por el responsable del flujo antes de usar el PR #117 como precedente
+de cumplimiento.
 
 ## Criterios de parada antes de una implementación funcional
 
