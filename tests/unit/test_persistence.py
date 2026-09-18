@@ -98,6 +98,8 @@ def test_initialization_is_idempotent_and_has_all_tables(tmp_path: Path) -> None
             "generation_record",
             "generation_transition",
             "generation_failure",
+            "content_progress_current",
+            "enrollment_progress_current",
         }
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 

@@ -2,15 +2,27 @@
 
 ## Propósito y límite de este documento
 
-Este documento implementa únicamente la fase de especificación/evidencia del
-plan aprobado para el Issue #112. No implementa un importador funcional, no
-crea tablas ni migraciones y no convierte el XLSX operativo en datos del
-repositorio.
+Este documento conserva la evidencia de contrato que autorizó la implementación
+del Issue #112. No contiene la muestra, filas, valores personales ni una copia
+del XLSX operativo; tampoco es un fixture de pruebas.
 
-La regla de esta auditoría es separar lo que está confirmado por el
-repositorio de las decisiones aprobadas para el diseño y de lo que sigue sin
-evidencia. Una decisión aprobada no constituye evidencia de que el formato
-real de ADAMS la cumpla.
+### Registro de autoridad de la muestra
+
+- **Autoridad:** responsable funcional del flujo ADAMS, mediante la muestra
+  autorizada entregada por el canal local/privado operativo.
+- **Fecha de revisión del contrato:** 2026-09-18.
+- **Referencia no sensible:** `adams-evolution-xlsx-contract-v1`.
+- **Custodia:** la muestra permanece fuera del repositorio, bajo
+  `data/private/` ignorado y acceso operativo restringido. No se usa como
+  fixture ni se copia a documentación, logs o Issues.
+
+La implementación se limita a las propiedades estructurales y semánticas
+registradas abajo. Cualquier columna o fila fuera de ellas sigue siendo
+desconocida y no se importa.
+
+La regla de esta auditoría es separar lo confirmado por la muestra autorizada,
+lo aprobado para el diseño y lo que sigue sin evidencia. La referencia anterior
+identifica la autorización, pero no permite reconstruir la muestra.
 
 ## Fuentes autorizadas consultadas
 
@@ -145,10 +157,39 @@ del formato real antes de implementarse:
 - Mantener la importación local, transaccional, idempotente y condicionada a
   confirmación humana, sin generar ni enviar comunicaciones.
 
-## Evidencia ausente y bloqueo explícito
+## Decisiones finales M1--M5 y comprobación de implementación
 
-No hay en el repositorio una especificación oficial ni una muestra
-anonimizada/autorizada del XLSX que confirme los puntos siguientes:
+Estas decisiones son parte del plan final y no son cuestiones abiertas:
+
+| Decisión | Reflejo explícito | Cobertura verificable |
+| --- | --- | --- |
+| **M1 Custodia/evidencia** | La evidencia autorizada se identifica como `adams-evolution-xlsx-contract-v1`, permanece en `data/private/` ignorado y no se usa como fixture, log ni documentación reproducible. | Este registro de custodia y `git check-ignore`/auditoría de seguridad; los tests crean únicamente XLSX sintéticos bajo `tmp_path`. |
+| **M2 Lector genérico/adaptador** | `read_xlsx_values` solo lee filas estructurales; `evolution_xlsx` interpreta bloques, identidad, alcance y porcentajes. Ninguna capa genérica conoce el dominio de evolución. | `tests/unit/test_evolution_xlsx.py` ejercita el adaptador con workbook sintético y la suite existente de `tabular_import` conserva la frontera estructural. |
+| **M3 API operativa preview/apply** | `import_evolution_xlsx(..., confirm=False)` es preview sin escritura y `confirm=True` es apply tras confirmación humana. Es la interfaz operativa reproducible; UI y CLI adicional quedan fuera de alcance. | Las pruebas de preview, apply, idempotencia y consistencia del plan verifican ambas rutas. |
+| **M4 Contadores/auditoría no solapados** | `changed`/`unchanged` cuentan cambios de estado global o de contenido; `rejected` y `excluded` cuentan diagnósticos separados. `import_batch_change` conserva una entrada por diagnóstico o cambio, sin filas fuente ni PII. | Las pruebas de contadores, exclusiones, cambios globales y privacidad comprueban categorías y mensajes no identificables. |
+| **M5 Mensajes privacy-safe** | Los diagnósticos solo exponen códigos, fila y mensajes genéricos; nunca el identificador, nombre, correo o fila completa. | `test_apply_keeps_diagnostics_private_and_records_global_changes` y las comprobaciones de seguridad del repositorio lo verifican. |
+
+La aplicación atómica también está comprobada: una prueba sintética fuerza un
+fallo durante `apply` y verifica que se revierten estado, estructura y toda la
+auditoría del lote.
+
+## Contrato confirmado por la muestra autorizada
+
+La revisión `adams-evolution-xlsx-contract-v1` confirmó: una hoja activa con
+bloques iniciados por `Usuario`, la identidad estable en esa celda, la columna
+G titulada `Evolución`, porcentajes expresados como valores 0--100 (incluidos
+0 y 100), y filas de contenido con módulos `Módulo 1` a `Módulo 4` o
+submódulos con módulo y número romano. La fecha de importación es la fecha de
+actualización del estado local. Los nombres visibles no se usan para resolver
+matrículas.
+
+La muestra no autoriza inferencias sobre actividades, evaluaciones, filas fuera
+del patrón, vacíos, duplicados o semánticas distintas de las anteriores; esas
+entradas se excluyen o diagnostican sin transformación silenciosa.
+
+## Evidencia aún ausente y límites explícitos
+
+La evidencia autorizada no confirma los puntos siguientes:
 
 | Área | No confirmado |
 | --- | --- |
@@ -161,11 +202,11 @@ anonimizada/autorizada del XLSX que confirme los puntos siguientes:
 | Progreso | Si el valor es páginas visualizadas, porcentaje, fracción, contador, estado o acumulado. |
 | Contenido | Títulos, identificadores estables, orden y relación real entre módulos y submódulos. |
 
-En consecuencia, no se puede afirmar todavía el contrato estructural del XLSX
-real, ni aceptar como importable una fila real, ni definir una conversión de
-vacíos/duplicados/columna G. El bloqueo no se resuelve usando nombres o
-posiciones plausibles: hacerlo inventaría semántica, incumpliría el plan y
-podría asociar progreso a otra matrícula.
+En consecuencia, el importador no acepta esas variantes: las diagnostica o las
+excluye. No usa nombres ni posiciones como heurística de identidad y nunca
+registra filas completas. Las decisiones M1--M5 anteriores describen el
+tratamiento aprobado de custodia, arquitectura, operación y privacidad; no
+convierten variantes no evidenciadas en semántica del dominio.
 
 ## Contenido importable y exclusiones: estado de la especificación
 
@@ -184,7 +225,7 @@ final`, actividades, evaluaciones y contenido fuera de módulo 1--4 o fuera del
 patrón de submódulo. La evidencia disponible no permite afirmar cómo se
 representan textualmente esas categorías en el XLSX.
 
-## Auditoría de incompatibilidad de persistencia
+## Decisión de persistencia implementada
 
 El requisito aprobado de #112 es **estado actual por matrícula y contenido**:
 upsert, última actualización de la importación, conservación ante ausencia y
@@ -200,10 +241,12 @@ sin snapshots históricos. El estado actual del repositorio es diferente:
 - La tabla actual no contiene un campo para el porcentaje global de G ni una
   marca que distinga páginas visualizadas de ese porcentaje.
 
-Usar `ContentProgressSnapshot` sin cambiar su semántica incumpliría el plan:
-crearía histórico y no permitiría un upsert inequívoco del estado actual.
-Cambiar silenciosamente su significado también rompería la documentación y
-los consumidores que esperan observaciones históricas.
+Por ello, la implementación usa `content_progress_current` y
+`enrollment_progress_current` para estado actual, y deja
+`ContentProgressSnapshot` sin modificar como histórico. Las tablas son únicas
+por matrícula/contenido o matrícula, conservan ausencias, separan G y páginas,
+y actualizan `imported_at` con la fecha del lote. Cambiar esta decisión
+requeriría replanteamiento; no es una tarea pendiente de #112.
 
 ### Alternativas consideradas
 
@@ -218,14 +261,13 @@ los consumidores que esperan observaciones históricas.
    pero no ofrece persistencia durable, consulta uniforme ni transacción con la
    revisión/aplicación local. No es adecuado para el requisito operativo.
 
-### Recomendación no implementada
+### Decisión adoptada
 
-Recomiendo la alternativa 2: una representación específica de estado actual,
+Se adopta la alternativa 2: una representación específica de estado actual,
 separada de `ContentProgressSnapshot`, con identidad única por matrícula y
 nodo, fecha de importación y campos separados para páginas visualizadas y G.
-La entidad exacta, nombres de columnas, restricciones, migración y relación
-con `ContentNode` requieren aprobación de diseño después de confirmar el
-formato real. Este documento no crea nada de ello.
+La implementación concreta está en el esquema y en `evolution_xlsx.py`; no
+modifica la semántica histórica existente.
 
 ### Matriz de decisiones pendientes
 
@@ -238,7 +280,7 @@ formato real. Este documento no crea nada de ello.
 | Columna G | Se requiere separarla del progreso de páginas | Confirmar nombre, unidad, escala y granularidad | Evidencia autorizada y decisión funcional | Pendiente; bloquea persistencia |
 | Progreso de páginas | El dominio acepta 0--100, pero la fuente no está confirmada | Confirmar semántica, unidad y rango de la fuente | Contrato autorizado | Pendiente; bloquea validación funcional |
 | Contenido y jerarquía | `ContentNode` soporta módulos, submódulos y elementos | Confirmar identificadores, títulos y jerarquía importables | Catálogo/contrato autorizado; no inferencia por título | Pendiente; bloquea creación de estructura |
-| Estado actual frente a histórico | `ContentProgressSnapshot` es fechado y append-only | Aprobar entidad/tabla separada para upsert actual, ausencias conservadoras y última actualización | Decisión arquitectónica explícita | Pendiente; bloquea migración |
+| Estado actual frente a histórico | `ContentProgressSnapshot` es fechado y append-only | Usar tablas específicas para upsert actual, ausencias conservadoras y última actualización | Decisión M1--M5 y esquema implementado | Resuelto |
 | Fecha de actualización | El plan propone la fecha de importación | Confirmar que no se usará una fecha inventada del informe | Aprobación del contrato funcional | Pendiente; bloquea modelo final |
 | Confirmación y transacción | El plan exige preview, confirmación e idempotencia | Confirmar el límite exacto entre preview y aplicación | Decisión de flujo aprobada | Pendiente; bloquea servicio |
 
