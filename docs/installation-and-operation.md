@@ -189,6 +189,41 @@ estructura, y no presentarla como compatible hasta disponer de una adaptación
 específica y aprobada. No inventes nombres de columnas, escalas, reglas de
 aprobación o correspondencias de identificadores.
 
+### Flujo `evolution_xlsx` (interfaz operativa de #112)
+
+La vía API local reproducible es **la interfaz operativa aprobada de #112**:
+`import_evolution_xlsx(path, database_path, edition_id, imported_at,
+confirm=False)`. Con `confirm=False` produce el preview sin escrituras; con
+`confirm=True` aplica el mismo plan únicamente tras la confirmación humana
+explícita. Esta API es la interfaz operativa reproducible y verificable del
+flujo. Una UI o una CLI adicional quedan expresamente fuera de alcance en
+#112; no son interfaces alternativas implícitas ni requisitos pendientes.
+
+El importador específico de evolución usa el XLSX operativo únicamente desde
+una ubicación local ignorada, normalmente `data/private/`. No copies el archivo
+ni sus filas al repositorio. El flujo es:
+
+1. Ejecuta la operación en modo **preview** y revisa los contadores de cambios,
+   sin cambios, rechazos y `excluded`. Las exclusiones explícitas (por ejemplo,
+   presentación, actividades, evaluaciones, resumen o caso final) se muestran
+   como diagnóstico informativo y no son errores ni bloquean la confirmación.
+2. Verifica los diagnósticos de identidad y porcentajes. Solo se resuelven
+   matrículas existentes mediante el identificador estable aprobado; nunca por
+   nombre o posición.
+3. Confirma explícitamente la aplicación. La escritura es transaccional y
+   actualiza el estado actual, no un histórico de snapshots.
+4. El lote calcula un fingerprint SHA-256 del archivo y una clave de
+   idempotencia por edición. Repetir el mismo archivo no duplica cambios ni
+   nodos.
+
+Los porcentajes de páginas y el porcentaje global de la columna G (`Evolución`)
+se almacenan por separado. Si un módulo o submódulo falta en una importación
+posterior, se conserva el último estado conocido: la ausencia no significa cero,
+borrado, reinicio ni retroceso. Cuando un lote contiene un módulo y sus
+submódulos, preview y apply usan el mismo orden lógico de dos pasadas: primero
+se planifican/aplican los módulos y después los submódulos, sin crear padres
+implícitos fuera del lote.
+
 ## 6. Comunicaciones manuales
 
 El flujo de comunicaciones del dashboard requiere revisión humana y no llama

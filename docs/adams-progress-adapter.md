@@ -18,19 +18,28 @@ text; the adapter deliberately does not assume a 0–100 or 0–1 scale, range,
 rounding, cumulative meaning, or semantic label. An optional timestamp accepts
 only an ISO-8601 string and is stored in canonical ISO text form.
 
-## Facts still unknown
+## Confirmed evolution XLSX
 
-- The real report name, file format, sheet, delimiter, encoding, and headers.
-- Whether progress is a scalar, status, percentage, fraction, count, or another
-  measure, and what its units or range mean.
-- Whether values are current snapshots, event records, or cumulative measures.
-- Which field identifies a student, enrollment, edition, or course, and whether
-  identifiers are stable.
-- Whether a timestamp exists, its timezone policy, and its actual format.
-- Whether reports contain blank, formula, sentinel, localized-number, or other
-  source-specific values.
+`adams_tutoria.evolution_xlsx` parses the confirmed local report as `Usuario`
+blocks, retaining column G (`Evolución`) separately from detail percentages.
+Only modules 1–4 and titles using the `module + Roman numeral` convention are
+eligible; activities, evaluations, presentation, summary and final-case rows
+are excluded. Blocks resolve only through existing `dni/global` enrollment
+identities, never by name. Preview is non-persistent; confirmed application is
+transactional and stores current state in dedicated tables, leaving historical
+`ContentProgressSnapshot` observations untouched. Missing later rows are kept
+as the last known state. Operational files remain local and ignored.
 
-When an approved anonymized report is available, update only this mapping and
-adapter's narrowly scoped conversion logic, together with synthetic tests and
-this documentation. Keep the generic reader, import contract, domain,
-persistence, and application services source-independent.
+## Confirmed contract boundaries
+
+The authorized sample confirmed only the `Usuario` block layout, column G
+(`Evolución`), the 0–100 percentage range, and the module/submodule naming
+convention described above. The adapter does not assign semantics to excluded
+columns, activities, evaluations, or rows outside that convention. The
+`Usuario` value is an exact `dni/global` identity already attached to an
+`Enrollment`; names are never used for matching.
+
+The import is an explicitly confirmed, local operation. Preview calculates
+real change, unchanged, and rejected counters without writing. Confirmation
+records privacy-safe `import_batch`/`import_batch_change` metadata and applies
+all state changes in one transaction. It never stores source rows or PII.
