@@ -70,6 +70,17 @@ def read_tabular(
     return _validate_rows(source_name, source_kind, rows, options)
 
 
+def read_xlsx_values(path: str | Path | BinaryIO) -> Iterator[Sequence[object]]:
+    """Yield XLSX rows without assigning meaning to headers or values.
+
+    This is the generic structural reader boundary.  Format-specific adapters
+    may consume repeated headers and positional rows, but the reader itself
+    must not resolve identities, interpret percentages, or persist data.
+    """
+
+    yield from _read_xlsx(path)
+
+
 def import_tabular(
     path: str | Path,
     *,

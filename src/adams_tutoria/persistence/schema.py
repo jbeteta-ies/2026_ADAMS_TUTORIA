@@ -31,6 +31,18 @@ CREATE TABLE IF NOT EXISTS content_progress_snapshot (
     node_id TEXT NOT NULL REFERENCES content_node(id), captured_at TEXT NOT NULL,
     progress_percentage TEXT NOT NULL, external_id TEXT
 );
+CREATE TABLE IF NOT EXISTS content_progress_current (
+    enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
+    node_id TEXT NOT NULL REFERENCES content_node(id),
+    pages_percentage TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    PRIMARY KEY (enrollment_id, node_id)
+);
+CREATE TABLE IF NOT EXISTS enrollment_progress_current (
+    enrollment_id TEXT PRIMARY KEY REFERENCES enrollment(id),
+    global_g_percentage TEXT NOT NULL,
+    imported_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS evaluation (
     id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
     target_type TEXT NOT NULL, target_id TEXT NOT NULL, status TEXT NOT NULL,
@@ -71,7 +83,7 @@ CREATE TABLE IF NOT EXISTS import_batch (
     source_reference TEXT, source_fingerprint TEXT, context TEXT, action TEXT, group_name TEXT,
     total_count INTEGER NOT NULL DEFAULT 0, accepted_count INTEGER NOT NULL DEFAULT 0,
     rejected_count INTEGER NOT NULL DEFAULT 0, warning_count INTEGER NOT NULL DEFAULT 0,
-    error_count INTEGER NOT NULL DEFAULT 0
+    error_count INTEGER NOT NULL DEFAULT 0, excluded_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS import_batch_change (
     id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES import_batch(id),

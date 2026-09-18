@@ -86,6 +86,11 @@ def initialize_database(path: Path) -> None:
         for name, definition in IMPORT_BATCH_ADDITIONS.items():
             if name not in columns:
                 db.execute(f"ALTER TABLE import_batch ADD COLUMN {name} {definition}")
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(import_batch)")}
+        if "excluded_count" not in columns:
+            db.execute(
+                "ALTER TABLE import_batch ADD COLUMN excluded_count INTEGER NOT NULL DEFAULT 0"
+            )
         columns = {row["name"] for row in db.execute("PRAGMA table_info(evaluation)")}
         for name, definition in {
             "result_status": "TEXT NOT NULL DEFAULT 'unknown'",
