@@ -201,6 +201,7 @@ class EvaluationTargetType(Enum):
 
     MODULE = "module"
     ACTIVITY = "activity"
+    EVALUATION_ITEM = "evaluation_item"
 
 
 class EvaluationStatus(Enum):

@@ -134,3 +134,28 @@ key is scoped by source, context, enrollment and evaluation reference; replays
 are unchanged and changed observations append batch-linked history. It does not
 require content nodes or create structural entities, and retains
 `NOT_ATTEMPTED`, `ATTEMPTED` and `UNKNOWN` without inferring a passing result.
+
+## Positional evaluation XLSX
+
+`adams_tutoria.evaluations_xlsx` implements the approved positional contract:
+one edition per workbook, complete blocks of eight rows, DNI in `A2`, `A10`,
+and so on, and `E1`-`E4` in `C7:F7` with values in `C8:F8` (repeated every
+eight rows). It imports only four independent `EVALUATION_ITEM` observations;
+`E4` is labelled `Evaluación Final`. `Provincia`, `Grupo`, `Entradas`,
+`Nota UF`, and `media` are ignored. Empty markers are `NOT_ATTEMPTED`, numeric
+zero is an attempted zero, and optional thresholds are restricted to 50, 60,
+or 70. The mean is calculated only on demand and is never persisted.
+
+The importer previews before confirmation, with separate counts for additions,
+changes, unchanged records, rejected records, and ambiguous identities. An
+identity with no matching enrollment is diagnosed as `identity_not_resolved`;
+an identity with more than one matching enrollment is diagnosed separately as
+`identity_ambiguous`. Neither can be applied. Contract errors reject the whole
+workbook, while a valid confirmed import applies atomically, records history
+only for effective changes, and keys replay protection by SHA-256, the
+operator-supplied edition id, and contract version. The edition id is input
+metadata, never inferred from workbook cells; no dates or raw rows are
+invented or persisted. `import_evaluations_xlsx(..., confirm=False)` is the
+read-only preview path and `confirm=True` is the explicit confirmation/apply
+path. Tests use synthetic identifiers only; source workbooks and operational
+databases remain local and ignored.
