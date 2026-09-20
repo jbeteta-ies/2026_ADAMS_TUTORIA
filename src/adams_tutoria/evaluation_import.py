@@ -130,8 +130,8 @@ class EvaluationImportService:
             db.execute(
                 """INSERT INTO evaluation
                 (id,enrollment_id,target_type,target_id,status,score,max_score,passed,completed_at,
-                 target_label,external_id,result_status,raw_value,numeric_value,scale)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 target_label,external_id,result_status,raw_value,numeric_value,scale,threshold)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 values,
             )
             db.execute(
@@ -151,7 +151,7 @@ class EvaluationImportService:
             """UPDATE evaluation
             SET enrollment_id=?, target_type=?, target_id=?, status=?, score=?, max_score=?,
                 passed=?, completed_at=?, target_label=?, external_id=?, result_status=?,
-                raw_value=?, numeric_value=?, scale=?
+                raw_value=?, numeric_value=?, scale=?, threshold=?
             WHERE id=?""",
             (*values[1:], values[0]),
         )
@@ -177,6 +177,7 @@ class EvaluationImportService:
             record.result.raw_value,
             str(record.result.numeric_value) if record.result.numeric_value is not None else None,
             record.result.scale,
+            None,
         )
 
     @staticmethod
@@ -184,8 +185,8 @@ class EvaluationImportService:
         db.execute(
             """INSERT INTO evaluation_history
             (id,evaluation_id,batch_id,status,score,max_score,passed,completed_at,
-             result_status,raw_value,numeric_value,scale)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+             result_status,raw_value,numeric_value,scale,threshold)
+             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 str(uuid4()),
                 values[0],
@@ -199,6 +200,7 @@ class EvaluationImportService:
                 values[12],
                 values[13],
                 values[14],
+                values[15],
             ),
         )
 

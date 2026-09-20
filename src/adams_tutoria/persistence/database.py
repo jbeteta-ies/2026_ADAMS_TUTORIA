@@ -97,9 +97,15 @@ def initialize_database(path: Path) -> None:
             "raw_value": "TEXT",
             "numeric_value": "TEXT",
             "scale": "TEXT",
+            "threshold": "TEXT",
         }.items():
             if name not in columns:
                 db.execute(f"ALTER TABLE evaluation ADD COLUMN {name} {definition}")
+        history_columns = {
+            row["name"] for row in db.execute("PRAGMA table_info(evaluation_history)")
+        }
+        if "threshold" not in history_columns:
+            db.execute("ALTER TABLE evaluation_history ADD COLUMN threshold TEXT")
         columns = {row["name"] for row in db.execute("PRAGMA table_info(generation_record)")}
         for name, definition in {
             "draft_text": "TEXT",
