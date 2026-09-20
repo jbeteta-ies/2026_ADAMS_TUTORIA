@@ -26,6 +26,7 @@ class Course:
     code: str | None = None
     description: str | None = None
     content_source: "ContentSource | None" = None
+    active: bool = True
 
     def __post_init__(self) -> None:
         _require_non_blank(self.name, "name")
@@ -67,6 +68,7 @@ class Edition:
     external_id: str | None = None
     start_date: date | None = None
     end_date: date | None = None
+    active: bool = True
 
     def __post_init__(self) -> None:
         _require_non_blank(self.label, "label")

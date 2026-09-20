@@ -55,6 +55,12 @@ class _Repository:
             ).fetchone()
 
 
+def _state_active(path: Path, table: str, key: str, value: str) -> bool:
+    with connection(path) as db:
+        row = db.execute(f"SELECT active FROM {table} WHERE {key} = ?", (value,)).fetchone()
+    return row is None or bool(row["active"])
+
+
 class CourseRepository(_Repository):
     table = "course"
 
@@ -65,7 +71,8 @@ class CourseRepository(_Repository):
                 id,name,code,description,content_source_type,content_source_location,
                 content_source_subpath,content_source_revision) VALUES(?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET name=excluded.name, code=excluded.code,
-                description=excluded.description, content_source_type=excluded.content_source_type,
+                description=excluded.description,
+                content_source_type=excluded.content_source_type,
                 content_source_location=excluded.content_source_location,
                 content_source_subpath=excluded.content_source_subpath,
                 content_source_revision=excluded.content_source_revision""",
@@ -81,6 +88,11 @@ class CourseRepository(_Repository):
                     None if value.content_source is None else value.content_source.subpath,
                     None if value.content_source is None else value.content_source.revision,
                 ),
+            )
+            db.execute(
+                "INSERT INTO course_state(course_id, active) VALUES(?, ?) "
+                "ON CONFLICT(course_id) DO UPDATE SET active=excluded.active",
+                (to_db(value.id), int(value.active)),
             )
 
     def get(self, record_id: UUID) -> Course | None:
@@ -101,6 +113,7 @@ class CourseRepository(_Repository):
                     row["content_source_subpath"],
                     row["content_source_revision"],
                 ),
+                _state_active(self.path, "course_state", "course_id", row["id"]),
             )
         )
 
@@ -111,7 +124,9 @@ class EditionRepository(_Repository):
     def save(self, value: Edition) -> None:
         with connection(self.path) as db:
             db.execute(
-                """INSERT INTO edition VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+                """INSERT INTO edition
+                (id,course_id,label,external_id,start_date,end_date) VALUES(?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET
                 course_id=excluded.course_id,label=excluded.label,external_id=excluded.external_id,
                 start_date=excluded.start_date,end_date=excluded.end_date""",
                 (
@@ -123,12 +138,18 @@ class EditionRepository(_Repository):
                     to_db(value.end_date),
                 ),
             )
+            db.execute(
+                "INSERT INTO edition_state(edition_id, active) VALUES(?, ?) "
+                "ON CONFLICT(edition_id) DO UPDATE SET active=excluded.active",
+                (to_db(value.id), int(value.active)),
+            )
 
     def get(self, record_id: UUID) -> Edition | None:
         row = self._row(record_id)
         if row is None:
             return None
         course = CourseRepository(self.path).get(UUID(row["course_id"]))
+        active = _state_active(self.path, "edition_state", "edition_id", row["id"])
         return (
             None
             if course is None
@@ -139,6 +160,7 @@ class EditionRepository(_Repository):
                 row["external_id"],
                 from_date(row["start_date"]),
                 from_date(row["end_date"]),
+                active,
             )
         )
 

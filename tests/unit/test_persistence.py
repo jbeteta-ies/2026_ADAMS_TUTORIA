@@ -78,6 +78,8 @@ def test_initialization_is_idempotent_and_has_all_tables(tmp_path: Path) -> None
         assert names == {
             "course",
             "edition",
+            "course_state",
+            "edition_state",
             "student",
             "enrollment",
             "progress_snapshot",

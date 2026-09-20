@@ -10,6 +10,14 @@ CREATE TABLE IF NOT EXISTS edition (
     id TEXT PRIMARY KEY, course_id TEXT NOT NULL REFERENCES course(id), label TEXT NOT NULL,
     external_id TEXT, start_date TEXT, end_date TEXT
 );
+CREATE TABLE IF NOT EXISTS course_state (
+    course_id TEXT PRIMARY KEY REFERENCES course(id),
+    active INTEGER NOT NULL CHECK (active IN (0, 1))
+);
+CREATE TABLE IF NOT EXISTS edition_state (
+    edition_id TEXT PRIMARY KEY REFERENCES edition(id),
+    active INTEGER NOT NULL CHECK (active IN (0, 1))
+);
 CREATE TABLE IF NOT EXISTS student (
     id TEXT PRIMARY KEY, full_name TEXT NOT NULL, email TEXT, external_id TEXT
 );
