@@ -46,11 +46,18 @@ def initialize_database(path: Path) -> None:
     """Create all persistence tables, idempotently, without running at import time."""
 
     with connection(path) as db:
-        db.executescript(SCHEMA)
+        # ``executescript`` issues an implicit COMMIT before executing its
+        # script.  Migrations must be one unit: a rejected legacy catalog
+        # must not leave newly-created tables behind.
+        _reject_legacy_duplicates_if_present(db)
+        for statement in SCHEMA.split(";"):
+            if statement.strip():
+                db.execute(statement)
         columns = {row["name"] for row in db.execute("PRAGMA table_info(course)")}
         for name, definition in COURSE_ADDITIONS.items():
             if name not in columns:
                 db.execute(f"ALTER TABLE course ADD COLUMN {name} {definition}")
+        _migrate_catalog_state(db)
         columns = {row["name"] for row in db.execute("PRAGMA table_info(communication_record)")}
         for name, definition in COMMUNICATION_RECORD_ADDITIONS.items():
             if name not in columns:
@@ -122,6 +129,18 @@ def initialize_database(path: Path) -> None:
             "ON import_batch(idempotency_key) WHERE idempotency_key IS NOT NULL"
         )
         db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_course_code "
+            "ON course(code) WHERE code IS NOT NULL"
+        )
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_edition_external "
+            "ON edition(course_id, external_id) WHERE external_id IS NOT NULL"
+        )
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_edition_label "
+            "ON edition(course_id, label) WHERE external_id IS NULL"
+        )
+        db.execute(
             "CREATE INDEX IF NOT EXISTS idx_student_external_identity_student "
             "ON student_external_identity(student_id)"
         )
@@ -137,3 +156,48 @@ def initialize_database(path: Path) -> None:
             "CREATE INDEX IF NOT EXISTS idx_generation_failure_enrollment_time "
             "ON generation_failure(enrollment_id, occurred_at, id)"
         )
+
+
+def _migrate_catalog_state(db: sqlite3.Connection) -> None:
+    """Migrate legacy flags without selecting, deleting, or merging duplicates."""
+
+    course_columns = {row["name"] for row in db.execute("PRAGMA table_info(course)")}
+    edition_columns = {row["name"] for row in db.execute("PRAGMA table_info(edition)")}
+    course_active = "active" if "active" in course_columns else "1"
+    edition_active = "active" if "active" in edition_columns else "1"
+    db.execute(
+        f"INSERT OR IGNORE INTO course_state(course_id, active) "
+        f"SELECT id, {course_active} FROM course"
+    )
+    db.execute(
+        f"INSERT OR IGNORE INTO edition_state(edition_id, active) "
+        f"SELECT id, {edition_active} FROM edition"
+    )
+
+
+def _reject_legacy_duplicates_if_present(db: sqlite3.Connection) -> None:
+    tables = {
+        row["name"] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "course" in tables and "edition" in tables:
+        _reject_legacy_duplicates(db)
+
+
+def _reject_legacy_duplicates(db: sqlite3.Connection) -> None:
+    duplicate_course = db.execute(
+        "SELECT code FROM course WHERE code IS NOT NULL GROUP BY code HAVING COUNT(*) > 1"
+    ).fetchone()
+    if duplicate_course is not None:
+        raise ValueError(f"duplicate course code: {duplicate_course['code']}")
+    duplicate_edition = db.execute(
+        "SELECT course_id, external_id FROM edition WHERE external_id IS NOT NULL "
+        "GROUP BY course_id, external_id HAVING COUNT(*) > 1"
+    ).fetchone()
+    if duplicate_edition is not None:
+        raise ValueError("duplicate edition external_id")
+    duplicate_label = db.execute(
+        "SELECT course_id, label FROM edition WHERE external_id IS NULL "
+        "GROUP BY course_id, label HAVING COUNT(*) > 1"
+    ).fetchone()
+    if duplicate_label is not None:
+        raise ValueError("duplicate edition label")
