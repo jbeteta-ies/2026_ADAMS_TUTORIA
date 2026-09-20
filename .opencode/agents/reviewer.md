@@ -1,7 +1,7 @@
 ---
 description: Performs an independent code and architecture review before human approval.
 mode: subagent
-model: github-copilot/mai-code-1.1-flash
+model: opencode/big-pickle
 temperature: 0.2
 permissions:
   - action: edit
