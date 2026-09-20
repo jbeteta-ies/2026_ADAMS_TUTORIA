@@ -1,7 +1,7 @@
 ---
 description: Independently validates an implementation against the GitHub Issue and project rules.
 mode: subagent
-model: opencode/muse-spark-1.3-contributor-free
+model: opencode/muse-spark-1.2-contributor-free
 temperature: 0.1
 permissions:
   - action: edit
