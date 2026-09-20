@@ -39,7 +39,9 @@ def demo_profile(enrollment_id: UUID, actions: tuple[TutorAction, ...] = ()) -> 
         f"alumno-{identity}@example.invalid",
     )
     course = Course(uuid5(NAMESPACE_URL, "demo-course"), "Curso sintético")
-    edition = Edition(summary.edition_id, course, "Edición sintética")
+    # Keep the synthetic editions distinct under the catalog's operational
+    # identity rules while retaining the human-readable demo label.
+    edition = Edition(summary.edition_id, course, "Edición sintética", str(summary.edition_id))
     enrollment = Enrollment(enrollment_id, student, edition)
     now = datetime(2026, 1, 1, tzinfo=UTC)
     snapshots = (

@@ -1,5 +1,6 @@
 """Explicit SQLite persistence for the domain model."""
 
+from .catalog import Catalog
 from .database import connection, database_path, initialize_database
 from .repositories import (
     CommunicationRecordRepository,
@@ -22,4 +23,5 @@ __all__ = [
     "connection",
     "database_path",
     "initialize_database",
+    "Catalog",
 ]

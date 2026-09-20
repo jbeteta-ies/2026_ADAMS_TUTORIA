@@ -114,6 +114,7 @@ def test_entity_signatures_keep_explicit_uuid_identity_and_optional_defaults() -
         "code",
         "description",
         "content_source",
+        "active",
     ]
     assert [field.name for field in edition_fields] == [
         "id",
@@ -122,6 +123,7 @@ def test_entity_signatures_keep_explicit_uuid_identity_and_optional_defaults() -
         "external_id",
         "start_date",
         "end_date",
+        "active",
     ]
     assert course_fields[2].default is None
     assert course_fields[3].default is None
