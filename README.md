@@ -37,20 +37,21 @@ Both commands print the application banner and exit.
 
 ### Streamlit dashboard
 
-The initial dashboard shell uses only synthetic catalog options and does not
-read SQLite, ADAMS exports, or any operational data. Start it with:
+The dashboard reads courses, editions, enrollments, progress, evaluations and
+communication history from the local SQLite operational store. It is read-only
+for those domain records and never seeds profiles or synthetic data. Start it
+with:
 
 ```bash
 uv run streamlit run src/adams_tutoria/dashboard.py
 ```
 
-The sidebar provides basic navigation and independent course/edition
-selectors. Editions are filtered by the selected course. The current
-selection is kept in Streamlit session state as `course_id` and `edition_id`.
-The Edición page currently shows six deterministic metrics over a synthetic
-demo provider: total enrollments, not started, inactive, pending evaluations,
-completed, and cases requiring attention. It does not read SQLite, imports, or
-ADAMS data; an enrollment can contribute to several reason metrics.
+The sidebar provides independent persisted course/edition selectors. Empty and
+archived selections are shown without creating replacement records. The
+Edición page separates progress from evaluation status and consumes the
+existing follow-up and recommendation contracts. Ollama is optional and
+loopback-only; generation requires an explicitly selected available model,
+shows a minimized operational context, and always requires human review.
 
 ## Development
 
