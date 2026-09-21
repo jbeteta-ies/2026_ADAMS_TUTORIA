@@ -1,7 +1,7 @@
 """Synthetic, deterministic tests for communication recommendations."""
 
 from dataclasses import FrozenInstanceError
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 from uuid import UUID
@@ -11,7 +11,9 @@ import pytest
 from adams_tutoria.attention import AttentionCase, PriorityLevel
 from adams_tutoria.communication_recommendations import (
     CommunicationRecommendation,
+    EditionPolicyContext,
     RecommendationConfig,
+    RecommendationDiagnostic,
     RecommendationHistoryEntry,
     RecommendationStatus,
     RepetitionPolicy,
@@ -34,6 +36,9 @@ def _summary(
     reasons: tuple[FollowUpReason, ...] = (),
     passed: int = 0,
     failed: int = 0,
+    percentage: Decimal | None = None,
+    previous_percentage: Decimal | None = None,
+    previous_progress_at: datetime | None = None,
 ) -> EnrollmentSummary:
     enrollment_id = enrollment_id or UUID(int=1)
     edition = Edition(edition_id, Course(UUID(int=20), "Curso sintético"), "Edición sintética")
@@ -43,7 +48,12 @@ def _summary(
         enrollment_id,
         enrollment.student.id,
         edition_id,
-        ProgressSummary(None, None),
+        ProgressSummary(
+            percentage,
+            AS_OF if percentage is not None else None,
+            previous_percentage,
+            previous_progress_at,
+        ),
         EvaluationSummary(passed + failed, 0, passed + failed, passed, failed, 0),
         assessment,
     )
@@ -67,6 +77,8 @@ def _config(
     max_occurrences: int = 1,
     cooldown: timedelta = timedelta(0),
     postponed_counts_toward_limit: bool = False,
+    progress_below: Decimal | None = None,
+    recovery_within: timedelta | None = timedelta(days=14),
 ) -> RecommendationConfig:
     return RecommendationConfig(
         mapping
@@ -78,6 +90,8 @@ def _config(
             "failed_evaluation": "insufficient_result_encouragement",
         },
         RepetitionPolicy(max_occurrences, cooldown, postponed_counts_toward_limit),
+        progress_below=progress_below,
+        recovery_within=recovery_within,
     )
 
 
@@ -419,3 +433,197 @@ def test_history_is_read_only_and_no_integration_is_attempted() -> None:
 
     assert result
     assert history == []
+
+
+def test_temporal_rules_include_remaining_time_and_reject_archived_or_ambiguous_editions() -> None:
+    summary = _summary()
+    config = _config({"closing_soon": "inactivity_reminder"})
+    context = EditionPolicyContext(EDITION, end_date=date(2026, 2, 5))
+    result = recommend_communications(
+        [summary],
+        [_case(summary)],
+        [],
+        config,
+        as_of=AS_OF,
+        edition_contexts={EDITION: context},
+    )
+
+    assert len(result) == 1
+    assert result[0].suggested_at == AS_OF
+    assert result[0].remaining == timedelta(days=3, hours=12)
+    assert result[0].temporal_context == "closes:2026-02-05"
+    assert (
+        recommend_communications(
+            [summary],
+            [_case(summary)],
+            [],
+            config,
+            as_of=AS_OF,
+            edition_contexts={
+                EDITION: EditionPolicyContext(EDITION, end_date=date(2026, 2, 5), active=False)
+            },
+        )
+        == ()
+    )
+    assert (
+        recommend_communications(
+            [summary],
+            [_case(summary)],
+            [],
+            config,
+            as_of=AS_OF,
+            edition_contexts={
+                EDITION: EditionPolicyContext(EDITION, end_date=date(2026, 2, 5), active=None)
+            },
+        )
+        == ()
+    )
+
+
+def test_changed_temporal_window_or_reason_creates_a_traceable_recommendation() -> None:
+    summary = _summary(reasons=(FollowUpReason("inactive", "contexto A", True),))
+    config = _config()
+    first = _recommend(summary, config=config)[0]
+    changed = _summary(reasons=(FollowUpReason("inactive", "contexto B", True),))
+    second = _recommend(changed, config=config)[0]
+    assert first.deduplication_key == first.recommendation_id
+    assert first.recommendation_id != second.recommendation_id
+
+
+def test_approve_records_explicit_review_without_sending() -> None:
+    recommendation = _recommend(_summary(reasons=(FollowUpReason("inactive", "x", True),)))[0]
+    approved = recommendation.approve(reviewed_at=AS_OF)
+    assert recommendation.status is RecommendationStatus.CURRENT
+    assert approved.status is RecommendationStatus.APPROVED
+    assert approved.reviewed_at == AS_OF
+    with pytest.raises(ValueError, match="timezone-aware"):
+        recommendation.approve(reviewed_at=datetime(2026, 2, 1, 12))
+
+
+def test_recovery_is_independent_from_progress_below_configuration() -> None:
+    summary = _summary(
+        percentage=Decimal("40"),
+        previous_percentage=Decimal("20"),
+        previous_progress_at=AS_OF - timedelta(days=2),
+    )
+    config = _config(
+        {"recent_recovery": "passed_evaluation_congratulation"},
+        progress_below=None,
+    )
+
+    result = _recommend(summary, config=config)
+
+    assert len(result) == 1
+    assert result[0].trigger == "recent_recovery"
+
+
+@pytest.mark.parametrize(
+    ("percentage", "threshold", "expected"),
+    [
+        (Decimal("0"), Decimal("0"), ()),
+        (Decimal("49.99"), Decimal("50"), ("insufficient_progress",)),
+        (Decimal("50"), Decimal("50"), ()),
+        (Decimal("100"), Decimal("100"), ()),
+    ],
+)
+def test_progress_below_is_strict_and_supports_threshold_limits(
+    percentage: Decimal,
+    threshold: Decimal,
+    expected: tuple[str, ...],
+) -> None:
+    summary = _summary(percentage=percentage)
+    config = _config({"insufficient_progress": "inactivity_reminder"}, progress_below=threshold)
+
+    result = _recommend(summary, config=config)
+
+    assert tuple(item.trigger for item in result) == expected
+
+
+def test_progress_below_rejects_threshold_outside_percentage_limits() -> None:
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        _config(progress_below=Decimal("-0.01"))
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        _config(progress_below=Decimal("100.01"))
+
+
+def test_missing_data_returns_structured_diagnostics_without_changing_tuple_contract() -> None:
+    summary = _summary()
+    diagnostics: list[RecommendationDiagnostic] = []
+    result = recommend_communications(
+        [],
+        [_case(summary)],
+        [],
+        _config(),
+        as_of=AS_OF,
+        diagnostics=diagnostics,
+    )
+
+    assert result == ()
+    assert diagnostics == [
+        RecommendationDiagnostic(
+            "missing_summary",
+            "No hay resumen de matrícula para evaluar la recomendación.",
+            summary.enrollment_id,
+            summary.edition_id,
+            ("summary",),
+        )
+    ]
+
+
+def test_missing_progress_and_ambiguous_edition_are_diagnosed_explicitly() -> None:
+    summary = _summary()
+    diagnostics: list[RecommendationDiagnostic] = []
+    result = recommend_communications(
+        [summary],
+        [_case(summary)],
+        [],
+        _config({"closing_soon": "inactivity_reminder", "recent_recovery": "inactivity_reminder"}),
+        as_of=AS_OF,
+        edition_contexts={EDITION: EditionPolicyContext(EDITION, active=None)},
+        diagnostics=diagnostics,
+    )
+
+    assert result == ()
+    assert [diagnostic.code for diagnostic in diagnostics] == [
+        "missing_progress",
+        "ambiguous_edition_state",
+    ]
+
+
+def test_closing_window_has_inclusive_limits_and_no_recommendation_outside() -> None:
+    summary = _summary()
+    config = _config({"closing_soon": "inactivity_reminder"})
+    at_limit = EditionPolicyContext(EDITION, end_date=date(2026, 2, 8))
+    outside = EditionPolicyContext(EDITION, end_date=date(2026, 2, 9))
+
+    assert _recommend_with_context(summary, config, at_limit)
+    assert _recommend_with_context(summary, config, outside) == ()
+
+
+def _recommend_with_context(
+    summary: EnrollmentSummary,
+    config: RecommendationConfig,
+    context: EditionPolicyContext,
+) -> tuple[CommunicationRecommendation, ...]:
+    return recommend_communications(
+        [summary],
+        [_case(summary)],
+        [],
+        config,
+        as_of=AS_OF,
+        edition_contexts={EDITION: context},
+    )
+
+
+def test_review_flow_can_approve_or_discard_and_is_immutable() -> None:
+    recommendation = _recommend(_summary(reasons=(FollowUpReason("inactive", "x", True),)))[0]
+
+    approved = recommendation.review(RecommendationStatus.APPROVED, reviewed_at=AS_OF)
+    discarded = recommendation.review(RecommendationStatus.DISCARDED, reviewed_at=AS_OF)
+
+    assert recommendation.status is RecommendationStatus.CURRENT
+    assert approved.status is RecommendationStatus.APPROVED
+    assert discarded.status is RecommendationStatus.DISCARDED
+    assert approved.reviewed_at == discarded.reviewed_at == AS_OF
+    with pytest.raises(ValueError, match="approved or discarded"):
+        recommendation.review(RecommendationStatus.POSTPONED)

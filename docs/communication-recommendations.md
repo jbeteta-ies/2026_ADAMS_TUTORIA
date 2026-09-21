@@ -38,3 +38,23 @@ tratar automáticamente como `DISCARDED`. Las entradas históricas con
 `status=None` son deliberadamente neutrales cuando la fuente todavía no ofrece
 un estado de persistencia, evitando inventar `HISTORICAL` como estado de dominio.
 El renderizado es opcional y delega sin cambios en `message_templates.render_message`.
+
+Cuando faltan datos o la edición es ambigua, no se recomienda ni se infiere nada.
+Si el llamador proporciona `diagnostics`, la función devuelve códigos estructurados
+como `missing_summary`, `missing_progress`, `missing_edition_context` o
+`ambiguous_edition_state`, sin nombres, correos ni filas crudas.
+
+## Fechas, tiempo restante y revisión
+
+`EditionPolicyContext` modela explícitamente las fechas de la edición y su
+estado. Una edición archivada o con estado ambiguo no produce recomendaciones;
+las fechas ausentes desactivan únicamente las reglas temporales y las fechas
+incoherentes se rechazan. Las recomendaciones incluyen `suggested_at`,
+`remaining` y `temporal_context`; la ventana de cierre y los cambios relevantes
+de razón/progreso forman parte de la deduplicación. `approve()` y `review()` son
+operaciones explícitas, inmutables y registran `reviewed_at`, sin enviar nada.
+
+La señal `recent_recovery` es independiente de `progress_below`: requiere dos
+porcentajes observados, una mejora estricta y una fecha anterior dentro de
+`recovery_within` (o una ventana ilimitada si se configura `None`). Los límites
+de `closing_within` son inclusivos.
