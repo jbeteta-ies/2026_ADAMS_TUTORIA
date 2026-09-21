@@ -7,7 +7,8 @@ messages.
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from enum import Enum
 from hashlib import sha256
 from types import MappingProxyType
@@ -23,8 +24,20 @@ from .summary import EnrollmentSummary
 
 class RecommendationStatus(Enum):
     CURRENT = "current"
+    APPROVED = "approved"
     POSTPONED = "postponed"
     DISCARDED = "discarded"
+
+
+@dataclass(frozen=True, slots=True)
+class RecommendationDiagnostic:
+    """Privacy-safe explanation for data that prevented a recommendation."""
+
+    code: str
+    message: str
+    enrollment_id: UUID | None = None
+    edition_id: UUID | None = None
+    fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +61,9 @@ class RecommendationConfig:
 
     trigger_mapping: Mapping[str, str]
     repetition: RepetitionPolicy = RepetitionPolicy()
+    closing_within: timedelta = timedelta(days=7)
+    progress_below: Decimal | None = None
+    recovery_within: timedelta | None = timedelta(days=14)
 
     def __post_init__(self) -> None:
         normalized: dict[str, str] = {}
@@ -57,6 +73,41 @@ class RecommendationConfig:
             COMMUNICATION_CATALOG.get(identifier)
             normalized[trigger] = identifier
         object.__setattr__(self, "trigger_mapping", MappingProxyType(normalized))
+        if self.closing_within < timedelta(0):
+            raise ValueError("closing_within must not be negative")
+        if self.progress_below is not None and not Decimal("0") <= self.progress_below <= Decimal(
+            "100"
+        ):
+            raise ValueError("progress_below must be between 0 and 100")
+        if self.recovery_within is not None and self.recovery_within < timedelta(0):
+            raise ValueError("recovery_within must not be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class EditionPolicyContext:
+    """Explicit edition dates and lifecycle state used by temporal policies."""
+
+    edition_id: UUID
+    start_date: date | None = None
+    end_date: date | None = None
+    active: bool | None = True
+
+    def __post_init__(self) -> None:
+        if (
+            self.start_date is not None
+            and self.end_date is not None
+            and self.end_date < self.start_date
+        ):
+            raise ValueError("end_date must not be before start_date")
+
+    def remaining(self, as_of: datetime) -> timedelta | None:
+        if as_of.tzinfo is None or as_of.utcoffset() is None:
+            raise ValueError("as_of must be timezone-aware")
+        if self.end_date is None:
+            return None
+        return datetime.combine(self.end_date, datetime.min.time(), tzinfo=UTC) - as_of.astimezone(
+            UTC
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,9 +150,26 @@ class CommunicationRecommendation:
     priority: PriorityLevel
     status: RecommendationStatus = RecommendationStatus.CURRENT
     rendered_message: str | None = None
+    suggested_at: datetime | None = None
+    deduplication_key: str | None = None
+    reviewed_at: datetime | None = None
+    temporal_context: str | None = None
+    remaining: timedelta | None = None
 
     def discard(self) -> "CommunicationRecommendation":
         return replace(self, status=RecommendationStatus.DISCARDED)
+
+    def approve(self, *, reviewed_at: datetime | None = None) -> "CommunicationRecommendation":
+        _validate_optional_aware(reviewed_at, "reviewed_at")
+        return replace(self, status=RecommendationStatus.APPROVED, reviewed_at=reviewed_at)
+
+    def review(
+        self, status: RecommendationStatus, *, reviewed_at: datetime | None = None
+    ) -> "CommunicationRecommendation":
+        if status not in (RecommendationStatus.APPROVED, RecommendationStatus.DISCARDED):
+            raise ValueError("review status must be approved or discarded")
+        _validate_optional_aware(reviewed_at, "reviewed_at")
+        return replace(self, status=status, reviewed_at=reviewed_at)
 
     def postpone(self) -> "CommunicationRecommendation":
         return replace(self, status=RecommendationStatus.POSTPONED)
@@ -112,14 +180,76 @@ def _identity(enrollment_id: UUID, edition_id: UUID, identifier: str, trigger: s
     return sha256(value.encode("utf-8")).hexdigest()
 
 
-def _signals(summary: EnrollmentSummary) -> tuple[tuple[str, str], ...]:
+def _validate_optional_aware(value: datetime | None, name: str) -> None:
+    if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+        raise ValueError(f"{name} must be timezone-aware")
+
+
+def _signals(
+    summary: EnrollmentSummary,
+    context: EditionPolicyContext | None,
+    config: RecommendationConfig,
+    as_of: datetime,
+) -> tuple[tuple[str, str, str], ...]:
     """Return only explicit semantic signals, never score-derived signals."""
 
-    signals = [(reason.code, reason.explanation) for reason in summary.follow_up.reasons]
+    signals = [
+        (reason.code, reason.explanation, f"reason:{reason.code}:{reason.explanation}")
+        for reason in summary.follow_up.reasons
+    ]
     if summary.evaluations.explicitly_passed:
-        signals.append(("passed_evaluation", "Existe un resultado explícito de aprobado."))
+        signals.append(
+            ("passed_evaluation", "Existe un resultado explícito de aprobado.", "evaluation:passed")
+        )
     if summary.evaluations.explicitly_failed:
-        signals.append(("failed_evaluation", "Existe un resultado explícito de insuficiente."))
+        signals.append(
+            (
+                "failed_evaluation",
+                "Existe un resultado explícito de insuficiente.",
+                "evaluation:failed",
+            )
+        )
+    if context is not None and context.end_date is not None:
+        remaining = context.end_date - as_of.date()
+        if timedelta(0) <= remaining <= config.closing_within:
+            signals.append(
+                (
+                    "closing_soon",
+                    "La edición entra en la ventana configurada de cierre.",
+                    f"closing:{context.end_date.isoformat()}:{config.closing_within}",
+                )
+            )
+    if (
+        config.progress_below is not None
+        and summary.progress.percentage is not None
+        and summary.progress.percentage < config.progress_below
+    ):
+        signals.append(
+            (
+                "insufficient_progress",
+                "El progreso disponible está por debajo del umbral configurado.",
+                f"progress:{summary.progress.percentage}",
+            )
+        )
+    # Recovery is an independent signal: it must remain evaluable even when
+    # the optional low-progress threshold is deliberately disabled.
+    if (
+        summary.progress.percentage is not None
+        and summary.progress.previous_percentage is not None
+        and summary.progress.previous_progress_at is not None
+        and summary.progress.percentage > summary.progress.previous_percentage
+        and (
+            config.recovery_within is None
+            or as_of - summary.progress.previous_progress_at <= config.recovery_within
+        )
+    ):
+        signals.append(
+            (
+                "recent_recovery",
+                "El progreso observado muestra una mejora respecto a la observación anterior.",
+                f"recovery:{summary.progress.previous_progress_at.isoformat()}",
+            )
+        )
     return tuple(signals)
 
 
@@ -142,11 +272,14 @@ def recommend_communications(
     *,
     as_of: datetime,
     message_contexts: Mapping[tuple[UUID, UUID], MessageContext] | None = None,
+    edition_contexts: Mapping[UUID, EditionPolicyContext] | None = None,
+    diagnostics: list[RecommendationDiagnostic] | None = None,
 ) -> tuple[CommunicationRecommendation, ...]:
     """Create isolated, deduplicated recommendations in deterministic order.
 
-    History is consumed only for reads.  A missing summary or an unmapped signal
-    produces no suggestion (insufficient data), rather than a guessed message.
+    History is consumed only for reads. A missing or ambiguous input produces no
+    suggestion and is reported through ``diagnostics`` when supplied. The return
+    value remains the approved tuple-of-recommendations contract.
     """
 
     if as_of.tzinfo is None or as_of.utcoffset() is None:
@@ -166,12 +299,85 @@ def recommend_communications(
     for key, case in cases.items():
         summary = summaries_by_key.get(key)
         if summary is None:
+            if diagnostics is not None:
+                diagnostics.append(
+                    RecommendationDiagnostic(
+                        "missing_summary",
+                        "No hay resumen de matrícula para evaluar la recomendación.",
+                        key[0],
+                        key[1],
+                        ("summary",),
+                    )
+                )
             continue
-        for trigger, explanation in _signals(summary):
+        edition_context = None if edition_contexts is None else edition_contexts.get(key[1])
+        if (
+            edition_context is None
+            and "closing_soon" in config.trigger_mapping
+            and diagnostics is not None
+        ):
+            diagnostics.append(
+                RecommendationDiagnostic(
+                    "missing_edition_context",
+                    "Faltan fechas o estado de edición para evaluar reglas temporales.",
+                    key[0],
+                    key[1],
+                    ("edition_context",),
+                )
+            )
+        if (
+            summary.progress.percentage is None
+            and (
+                "insufficient_progress" in config.trigger_mapping
+                or "recent_recovery" in config.trigger_mapping
+            )
+            and diagnostics is not None
+        ):
+            diagnostics.append(
+                RecommendationDiagnostic(
+                    "missing_progress",
+                    "Falta progreso suficiente para evaluar la regla configurada.",
+                    key[0],
+                    key[1],
+                    ("progress.percentage",),
+                )
+            )
+        elif (
+            "recent_recovery" in config.trigger_mapping
+            and (
+                summary.progress.previous_percentage is None
+                or summary.progress.previous_progress_at is None
+            )
+            and diagnostics is not None
+        ):
+            diagnostics.append(
+                RecommendationDiagnostic(
+                    "missing_recovery_baseline",
+                    "Falta la observación anterior necesaria para evaluar recuperación.",
+                    key[0],
+                    key[1],
+                    ("progress.previous_percentage", "progress.previous_progress_at"),
+                )
+            )
+        if edition_context is not None and edition_context.active is not True:
+            if diagnostics is not None:
+                diagnostics.append(
+                    RecommendationDiagnostic(
+                        "ambiguous_edition_state"
+                        if edition_context.active is None
+                        else "inactive_edition",
+                        "El estado de la edición no permite evaluar recomendaciones.",
+                        key[0],
+                        key[1],
+                        ("active",),
+                    )
+                )
+            continue
+        for trigger, explanation, window in _signals(summary, edition_context, config, as_of):
             identifier = config.trigger_mapping.get(trigger)
             if identifier is None:
                 continue
-            recommendation_id = _identity(*key, identifier, trigger)
+            recommendation_id = _identity(*key, identifier, trigger + "\x1f" + window)
             matching = [entry for entry in entries if entry.recommendation_id == recommendation_id]
             occurrence_entries = matching
             if not config.repetition.postponed_counts_toward_limit:
@@ -202,6 +408,14 @@ def recommend_communications(
                     explanation,
                     case.priority,
                     rendered_message=rendered,
+                    suggested_at=as_of,
+                    deduplication_key=recommendation_id,
+                    temporal_context=(
+                        None if edition_context is None else f"closes:{edition_context.end_date}"
+                    ),
+                    remaining=(
+                        None if edition_context is None else edition_context.remaining(as_of)
+                    ),
                 ),
             )
     priority_order = {
