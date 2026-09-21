@@ -16,6 +16,8 @@ class ProgressSummary:
 
     percentage: Decimal | None
     last_progress_at: datetime | None
+    previous_percentage: Decimal | None = None
+    previous_progress_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -125,7 +127,9 @@ def summarize_enrollment(
         for snapshot in snapshots
         if snapshot.enrollment.id == enrollment.id and snapshot.captured_at <= as_of
     ]
-    latest = max(relevant_snapshots, key=lambda snapshot: snapshot.captured_at, default=None)
+    ordered_snapshots = sorted(relevant_snapshots, key=lambda snapshot: snapshot.captured_at)
+    latest = ordered_snapshots[-1] if ordered_snapshots else None
+    previous = ordered_snapshots[-2] if len(ordered_snapshots) > 1 else None
     relevant_evaluations = [
         evaluation for evaluation in evaluations if evaluation.enrollment.id == enrollment.id
     ]
@@ -145,6 +149,8 @@ def summarize_enrollment(
         ProgressSummary(
             None if latest is None else latest.progress_percentage,
             None if latest is None else latest.captured_at,
+            None if previous is None else previous.progress_percentage,
+            None if previous is None else previous.captured_at,
         ),
         EvaluationSummary(
             total=len(relevant_evaluations),
