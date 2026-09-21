@@ -18,6 +18,11 @@ manual; no hay autenticación, integración de envío ni cifrado en este alcance
 
 ## Rutas y configuración
 
+La pantalla Settings solo persiste en SQLite local los valores técnicos
+allowlisted de Ollama (modelo, endpoint loopback, temperatura, límite y
+timeout). Rechaza claves desconocidas y destinos remotos. La ausencia del
+modelo persistido se muestra como error y no activa fallback.
+
 | Superficie | Resultado de la auditoría | Mitigación vigente |
 | --- | --- | --- |
 | `data/private/` | Adecuada para exports, importaciones y comunicaciones privadas | `data/` está ignorado por Git |
@@ -83,6 +88,13 @@ Issue futura defina plazos y automatización, se aplica minimización y revisió
 manual periódica.
 
 ## Logs y errores
+
+El dashboard consulta repositorios existentes y no crea cursos, ediciones,
+matrículas, perfiles ni datos sintéticos al renderizar. El payload de Ollama
+se construye únicamente desde el contexto minimizado permitido por el contrato
+de generación; no contiene filas crudas, credenciales, sesiones, contacto ni
+informes completos. La respuesta registra solo el modelo reportado por Ollama,
+no el prompt ni la respuesta completa.
 
 No hay un subsistema de logging persistente configurado en la aplicación. La
 salida de arranque es un banner sin datos personales. Los errores de

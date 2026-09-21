@@ -15,9 +15,9 @@ la actividad del curso y el envío de comunicaciones.
 - [`uv`](https://docs.astral.sh/uv/) instalado y disponible en el `PATH`.
 - Acceso local al repositorio.
 
-No se necesita una cuenta de ADAMS para arrancar el banner CLI ni para explorar
-el dashboard sintético. La aplicación no implementa autenticación, conexión de
-envío a ADAMS ni sincronización automática.
+No se necesita una cuenta de ADAMS para arrancar el banner CLI ni para consultar
+el dashboard operativo con una base local poblada. La aplicación no implementa
+autenticación, conexión de envío a ADAMS ni sincronización automática.
 
 ## 2. Instalación con `uv`
 
@@ -80,7 +80,7 @@ compartas su URL cuando la instancia esté trabajando con datos personales.
 
 La barra lateral contiene:
 
-- **Navegación**: las secciones `Inicio`, `Curso` y `Edición`.
+- **Navegación**: las secciones `Inicio`, `Curso`, `Edición` y `Settings`.
 - **Curso**: selector de curso.
 - **Edición**: selector dependiente del curso seleccionado.
 
@@ -89,19 +89,17 @@ La selección se conserva durante la sesión de Streamlit con `course_id` y
 
 ### Inicio
 
-Muestra el shell del dashboard y el asistente de apoyo para dudas. El asistente
-busca únicamente en el contenido Markdown sintético incluido para el curso de
-demostración seleccionado. Al preparar un borrador se muestran sus referencias
-para que el tutor lo revise; no se envía automáticamente.
+Muestra el estado del dashboard y recuerda que las acciones de comunicación son
+manuales. No se ofrecen cursos o ediciones sintéticos: los selectores consultan
+únicamente SQLite local.
 
 ### Curso
 
-Presenta la información básica del curso seleccionado y un placeholder para
-indicadores futuros.
+Presenta la información básica del curso seleccionado.
 
 ### Edición
 
-La edición de demostración muestra métricas sintéticas de matrículas:
+La edición seleccionada muestra métricas de las matrículas persistidas:
 
 - total;
 - no iniciadas;
@@ -110,14 +108,29 @@ La edición de demostración muestra métricas sintéticas de matrículas:
 - finalizadas; y
 - casos que requieren atención.
 
-También permite filtrar y ordenar la tabla de seguimiento. Los identificadores,
-estados, porcentajes y fechas que aparecen en esta vista pertenecen al proveedor
-de demostración y no representan datos de ADAMS. Una misma matrícula puede
-contribuir a varias métricas de motivos.
+También muestra el estado activa/archivada, fechas de inicio y fin, cobertura de
+matrículas con progreso/evaluaciones y las fechas más recientes disponibles.
+Permite filtrar y ordenar la tabla de seguimiento. Los datos ausentes se
+presentan como `No disponible`; no se completan ni inventan.
 
-Al abrir una ficha sintética se pueden visualizar el perfil, el progreso, las
-evaluaciones y el historial. Las acciones del tutor se guardan en la base
+Al abrir una ficha se pueden visualizar el perfil, el progreso, las evaluaciones
+y el historial, manteniendo ambas fuentes separadas. Las acciones del tutor se guardan en la base
 SQLite local configurada por defecto; no se escriben en ADAMS.
+
+### Settings y Ollama local
+
+`Settings` permite validar y guardar localmente el endpoint de Ollama, modelo,
+temperatura, límite de tokens y timeout. Solo se aceptan `localhost`,
+`127.0.0.1` o `::1`. **Listar modelos locales** consulta `/api/tags`; si la
+lista está vacía o el modelo persistido ya no existe, el estado se muestra de
+forma explícita y no hay fallback silencioso. La ausencia de modelo impide
+generar de forma segura, pero nunca impide consultar el dashboard.
+
+Antes de cada generación se muestra un resumen del payload minimizado y
+allowlisted. No incluye nombres, correos, IDs externos, informes crudos,
+credenciales, sesiones ni filas SQLite. El borrador se muestra, edita, revisa
+y copia manualmente antes de que el tutor pueda registrarlo como enviado. La
+aplicación no llama a ADAMS, SMTP ni ningún canal de envío.
 
 ## 5. Importación genérica de reportes
 
@@ -306,13 +319,11 @@ puede referenciar un `ContentSource` local o un checkout de repositorio. La
 referencia de contenido se almacena como metadato; la aplicación no clona ni
 sincroniza repositorios.
 
-En el estado actual, el dashboard de demostración utiliza un catálogo sintético
-definido en código (`COURSES` y `EDITIONS`) y contenido Markdown de ejemplo.
-No existe todavía una pantalla operativa para registrar cursos o ediciones ni
-un procedimiento soportado para conectarlos a reportes reales. Añadir un curso
-real requiere una Issue que defina la fuente, el contrato de importación y la
-persistencia; no debe resolverse editando manualmente la documentación ni
-inventando un formato ADAMS.
+El dashboard operativo consulta el catálogo persistido en SQLite (`Course` y
+`Edition`); no contiene cursos ni ediciones sintéticos como fallback. No existe
+todavía una pantalla para registrar cursos o ediciones: usa los contratos de
+persistencia/importación aprobados. Añadir un curso real requiere una Issue que
+defina la fuente y el contrato; no debe resolverse inventando un formato ADAMS.
 
 Para preparar contenido seguro para una futura integración, mantenlo en su
 repositorio correspondiente, sin mezclarlo con `data/private/` ni con datos de
@@ -348,11 +359,12 @@ uv run streamlit run src/adams_tutoria/dashboard.py
 Si el puerto predeterminado está ocupado, Streamlit puede ofrecer otro puerto;
 abre la URL que indique el terminal.
 
-### La pantalla muestra datos sintéticos
+### La pantalla no muestra cursos o ediciones
 
-Es intencional en el MVP. El dashboard no lee automáticamente exports ni
-convierte un reporte ADAMS en datos de operación. Verifica que no estás usando
-la demo como evidencia de actividad real.
+El dashboard solo muestra datos persistidos. Una base vacía no ofrece opciones:
+aplica el flujo de importación local aprobado con datos sintéticos o una fuente
+operativa custodiada. No convierte automáticamente un reporte ADAMS ni inventa
+datos faltantes.
 
 ### Un importador rechaza un archivo
 
@@ -364,9 +376,9 @@ de un CSV con campos multilínea.
 
 ### No aparece una comunicación
 
-La sugerencia debe existir para la matrícula sintética y debe aprobarse antes
-de mostrar el texto completo. La aplicación no consulta ADAMS ni genera
-sugerencias a partir de un export real en este alcance.
+La recomendación debe existir para una matrícula persistida y debe revisarse
+antes de mostrar/usar el texto completo. La aplicación no consulta ADAMS ni
+envía comunicaciones.
 
 ### Se necesita recuperar una base
 
@@ -377,8 +389,8 @@ copia o sus sidecars en una ruta versionada.
 ## 11. Limitaciones conocidas
 
 - El CLI no ofrece todavía una interfaz interactiva.
-- El dashboard usa un proveedor y catálogo sintéticos para la mayor parte de
-  la experiencia.
+- El dashboard requiere un catálogo SQLite poblado para mostrar seguimiento;
+  no incluye fallback sintético.
 - No hay importación ADAMS específica, reconciliación, sincronización ni
   persistencia automática de reportes.
 - No hay autenticación, cifrado, backup automático ni retención automática.

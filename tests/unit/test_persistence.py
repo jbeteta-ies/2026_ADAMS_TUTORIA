@@ -102,6 +102,7 @@ def test_initialization_is_idempotent_and_has_all_tables(tmp_path: Path) -> None
             "generation_failure",
             "content_progress_current",
             "enrollment_progress_current",
+            "ollama_settings",
         }
         assert db.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
@@ -260,6 +261,26 @@ def test_content_hierarchy_and_append_only_progress_round_trip(tmp_path: Path) -
         snapshots.save(first)
 
 
+def test_content_progress_current_projection_is_empty_or_readable(tmp_path: Path) -> None:
+    path = tmp_path / "content-current.sqlite3"
+    course, edition, _, enrollment = _ready(path)
+    module = ContentNode(uuid4(), course, edition, ContentNodeType.MODULE, "Synthetic module")
+    ContentNodeRepository(path).save(module)
+    repository = ContentProgressSnapshotRepository(path)
+    assert repository.list_current_for_enrollment(enrollment.id) == ()
+    imported_at = datetime(2026, 2, 3, tzinfo=UTC)
+    with connection(path) as db:
+        db.execute(
+            "INSERT INTO content_progress_current VALUES(?,?,?,?)",
+            (str(enrollment.id), str(module.id), "42", imported_at.isoformat()),
+        )
+    values = repository.list_current_for_enrollment(enrollment.id)
+    assert len(values) == 1
+    assert values[0].node.id == module.id
+    assert values[0].progress_percentage == Decimal("42")
+    assert values[0].captured_at == imported_at
+
+
 def test_content_nodes_and_progress_reject_invalid_scope_and_percentage(tmp_path: Path) -> None:
     course, edition, student, enrollment = _graph()
     other_edition = Edition(uuid4(), course, "Other")
@@ -355,6 +376,23 @@ def test_snapshot_is_insert_only_and_upserts_evaluation_and_communication(tmp_pa
     communications = CommunicationRecordRepository(path)
     communications.save(communication)
     assert communications.get(communication.id) == communication
+
+
+def test_progress_repository_projects_issue_112_current_global_progress(tmp_path: Path) -> None:
+    path = tmp_path / "current-progress.sqlite3"
+    *_, enrollment = _ready(path)
+    imported_at = datetime(2026, 3, 5, 10, tzinfo=UTC)
+    with connection(path) as db:
+        db.execute(
+            "INSERT INTO enrollment_progress_current VALUES(?,?,?)",
+            (str(enrollment.id), "75", imported_at.isoformat()),
+        )
+
+    values = ProgressSnapshotRepository(path).list_for_enrollment(enrollment.id)
+
+    assert len(values) == 1
+    assert values[0].progress_percentage == Decimal("75")
+    assert values[0].captured_at == imported_at
 
 
 def test_operational_path_is_not_touched_by_persistence_tests(tmp_path: Path) -> None:
