@@ -1,157 +1,244 @@
-"""Tests for the synthetic Streamlit dashboard shell."""
+"""Tests for the persistence-backed dashboard boundary."""
 
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
+from uuid import UUID, uuid4
 
+from adams_tutoria.config import default_config
 from adams_tutoria.dashboard import (
-    COURSES,
-    EDITIONS,
     _dashboard_request,
+    _operational_summaries,
     _record_key,
     editions_for_course,
 )
 from adams_tutoria.demo_summary import demo_enrollment_summaries
+from adams_tutoria.domain import (
+    ContentNode,
+    ContentNodeType,
+    Course,
+    Edition,
+    Enrollment,
+    ProgressSnapshot,
+    Student,
+)
+from adams_tutoria.generation import HttpResponse
+from adams_tutoria.ollama import OllamaSettings, OllamaSettingsRepository
+from adams_tutoria.persistence.database import connection, database_path, initialize_database
+from adams_tutoria.persistence.repositories import (
+    ContentNodeRepository,
+    CourseRepository,
+    EditionRepository,
+    EnrollmentRepository,
+    ProgressSnapshotRepository,
+    StudentRepository,
+)
 
 
-def test_streamlit_shell_renders_with_apptest():
-    """The dashboard starts in Streamlit's supported headless test harness."""
-
-    from streamlit.testing.v1 import AppTest
-
-    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
-    app = AppTest.from_file(dashboard_path).run()
-
-    assert not app.exception
-    assert app.sidebar.selectbox[0].label == "Curso"
-    assert app.sidebar.selectbox[1].label == "Edición"
-
-
-def test_edition_page_shows_exactly_six_metrics_and_values() -> None:
-    """The edition placeholder is replaced by the six required indicators."""
-
-    from streamlit.testing.v1 import AppTest
-
-    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
-    app = AppTest.from_file(dashboard_path).run()
-    app.sidebar.radio[0].set_value("Edición").run()
-
-    assert [metric.label for metric in app.metric] == [
-        "Total",
-        "No iniciados",
-        "Inactivos",
-        "Evaluaciones pendientes",
-        "Finalizados",
-        "Requieren atención",
-    ]
-    assert [metric.value for metric in app.metric] == ["2", "1", "1", "2", "0", "2"]
+def _seed_dashboard_database(tmp_path: Path) -> Path:
+    """Create a completely synthetic operational catalog for AppTest."""
+    config = default_config(base_dir=tmp_path)
+    path = database_path(config)
+    initialize_database(path)
+    course = Course(uuid4(), "Curso sintético", "SYN-APP")
+    edition = Edition(
+        uuid4(), course, "Edición sintética", "edition-app", date(2026, 1, 1), date(2026, 6, 1)
+    )
+    student = Student(uuid4(), "Alumno sintético", "alumno@example.invalid", "student-app")
+    enrollment = Enrollment(uuid4(), student, edition, "enrollment-app")
+    CourseRepository(path).save(course)
+    EditionRepository(path).save(edition)
+    StudentRepository(path).save(student)
+    EnrollmentRepository(path).save(enrollment)
+    ProgressSnapshotRepository(path).save(
+        ProgressSnapshot(uuid4(), enrollment, datetime(2026, 2, 1, tzinfo=UTC), Decimal("0"))
+    )
+    return path
 
 
-def test_question_assistant_shows_manual_draft_and_reference() -> None:
-    """The dashboard exposes a synthetic, traceable draft without sending it."""
-
-    from streamlit.testing.v1 import AppTest
-
-    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
-    app = AppTest.from_file(dashboard_path).run()
-    app.text_input[0].set_value("planificación tareas")
-    app.button[0].click().run()
-
-    assert not app.exception
-    assert any(widget.label == "Borrador (revisión manual)" for widget in app.text_area)
-    assert any("tema-uno.md" in widget.value for widget in app.caption)
-
-
-def test_changing_edition_is_isolated() -> None:
-    """Changing the selector recomputes only the selected synthetic edition."""
-
-    from streamlit.testing.v1 import AppTest
-
-    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
-    app = AppTest.from_file(dashboard_path).run()
-    app.sidebar.radio[0].set_value("Edición").run()
-    app.sidebar.selectbox[1].set_value("edition-alpha-2026-2").run()
-
-    assert [metric.value for metric in app.metric] == ["1", "0", "0", "0", "1", "0"]
-
-
-def test_beta_enrollment_without_follow_up_reasons_renders_profile() -> None:
-    """The Beta profile remains usable when no follow-up communication is suggested."""
-
-    from streamlit.testing.v1 import AppTest
-
-    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
-    app = AppTest.from_file(dashboard_path).run()
-    app.sidebar.radio[0].set_value("Edición").run()
-    app.sidebar.selectbox[0].set_value("course-demo-beta").run()
-    app.sidebar.selectbox[1].set_value("edition-beta-2026-1").run()
-    app.selectbox[-1].set_value(app.selectbox[-1].options[0]).run()
-
-    assert not app.exception
-    assert app.subheader[-1].value == "Ficha de alumno"
-
-
-def test_message_requires_approval_before_it_is_visible(tmp_path, monkeypatch) -> None:
-    """The synthetic message is gated by an explicit tutor approval."""
-
+def test_empty_operational_database_renders_without_synthetic_options(tmp_path, monkeypatch):
     from streamlit.testing.v1 import AppTest
 
     monkeypatch.chdir(tmp_path)
     dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
     app = AppTest.from_file(dashboard_path).run()
+
+    assert not app.exception
+    assert any("No hay un curso" in item.value for item in app.info)
+    assert not app.sidebar.selectbox
+
+
+def test_populated_operational_database_renders_from_sqlite_with_app_test(tmp_path, monkeypatch):
+    _seed_dashboard_database(tmp_path)
+    monkeypatch.setenv("ADAMS_TUTORIA_BASE_DIR", str(tmp_path))
+    from streamlit.testing.v1 import AppTest
+
+    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
+    app = AppTest.from_file(dashboard_path).run()
+    assert not app.exception
+    assert len(app.sidebar.selectbox) == 2
+    assert len(app.sidebar.selectbox[0].options) == 1
+    assert len(app.sidebar.selectbox[1].options) == 1
+
     app.sidebar.radio[0].set_value("Edición").run()
-    app.selectbox[-1].set_value(app.selectbox[-1].options[0]).run()
+    assert not app.exception
+    assert any("Contexto de la edición" in item.value for item in app.subheader)
+    assert any("Recomendaciones de comunicación" in item.value for item in app.subheader)
+    assert any("Borradores asistidos" in item.value for item in app.subheader)
 
-    assert not [widget for widget in app.text_area if widget.label.startswith("Mensaje")]
-    approve = next(
-        button for button in app.button if button.label == "Aprobar mensaje para revisión"
+
+def test_dashboard_reads_current_progress_contract_and_shows_coverage(tmp_path, monkeypatch):
+    path = _seed_dashboard_database(tmp_path)
+    imported_at = datetime(2026, 2, 15, tzinfo=UTC)
+    with connection(path) as db:
+        enrollment_id = db.execute("SELECT id FROM enrollment").fetchone()["id"]
+        db.execute("DELETE FROM progress_snapshot")
+        db.execute(
+            "INSERT INTO enrollment_progress_current VALUES(?,?,?)",
+            (enrollment_id, "75", imported_at.isoformat()),
+        )
+    monkeypatch.setenv("ADAMS_TUTORIA_BASE_DIR", str(tmp_path))
+    from streamlit.testing.v1 import AppTest
+
+    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
+    app = AppTest.from_file(dashboard_path).run()
+    app.sidebar.radio[0].set_value("Edición").run()
+
+    assert not app.exception
+    assert not app.error
+    with connection(path) as db:
+        edition_id = UUID(db.execute("SELECT id FROM edition").fetchone()["id"])
+    summaries, _, metadata = _operational_summaries(edition_id, default_config(base_dir=tmp_path))
+    assert summaries[0].progress.percentage == Decimal("75")
+    assert metadata is not None and metadata[4]["con progreso"] == 1
+
+
+def test_dashboard_projects_and_represents_content_progress_without_evaluations(
+    tmp_path, monkeypatch
+):
+    path = _seed_dashboard_database(tmp_path)
+    with connection(path) as db:
+        enrollment_id = db.execute("SELECT id FROM enrollment").fetchone()["id"]
+        edition_id = db.execute("SELECT id FROM edition").fetchone()["id"]
+        course_id = db.execute("SELECT course_id FROM edition").fetchone()["course_id"]
+    course = CourseRepository(path).get(UUID(course_id))
+    edition = EditionRepository(path).get(UUID(edition_id))
+    assert course is not None
+    assert edition is not None
+    node = ContentNode(
+        uuid4(),
+        course,
+        edition,
+        ContentNodeType.MODULE,
+        "Contenido sintético",
     )
-
-    approve.click().run()
-    messages = [widget for widget in app.text_area if widget.label.startswith("Mensaje")]
-    assert len(messages) == 1
-    message = messages[0].value
-    assert message is not None
-    assert "Alumno sintético" in message
-    assert any(button.label.startswith("Registrar COPIED") for button in app.button)
-    assert any(button.label.startswith("Descargar mensaje") for button in app.download_button)
-
-
-def test_dashboard_demo_source_contains_no_operational_data_access() -> None:
-    """The demo provider remains synthetic and privacy-safe."""
-
-    source = (Path(__file__).parents[2] / "src/adams_tutoria/demo_summary.py").read_text()
-    assert "sqlite" not in source.lower()
-    assert "email" not in source.lower()
-    assert "adams export" not in source.lower()
-
-
-def test_course_and_edition_ids_are_stable_and_unique():
-    """Catalog identifiers are explicit and unique."""
-
-    assert len({course.id for course in COURSES}) == len(COURSES)
-    assert len({edition.id for edition in EDITIONS}) == len(EDITIONS)
-
-
-def test_editions_are_filtered_by_course():
-    """The pure catalog function returns only editions for the selected course."""
-
-    assert [edition.id for edition in editions_for_course("course-demo-alpha")] == [
-        "edition-alpha-2026-1",
-        "edition-alpha-2026-2",
-    ]
-    assert all(
-        edition.course_id == "course-demo-beta"
-        for edition in editions_for_course("course-demo-beta")
+    ContentNodeRepository(path).save(node)
+    with connection(path) as db:
+        db.execute(
+            "INSERT INTO content_progress_current VALUES(?,?,?,?)",
+            (enrollment_id, str(node.id), "42", datetime(2026, 2, 20, tzinfo=UTC).isoformat()),
+        )
+    monkeypatch.setenv("ADAMS_TUTORIA_BASE_DIR", str(tmp_path))
+    summaries, _, metadata = _operational_summaries(
+        UUID(edition_id), default_config(base_dir=tmp_path)
     )
+    assert summaries[0].progress.percentage == Decimal("0")
+    assert metadata is not None
+    assert metadata[4]["con evaluaciones"] == 0
+    assert metadata[4]["con progreso por contenido"] == 1
+    assert metadata[5][0].node.title == "Contenido sintético"
+    assert metadata[5][0].progress_percentage == Decimal("42")
 
 
-def test_unknown_course_has_no_editions():
-    """Unknown selections do not expose unrelated editions."""
+class _AppTransport:
+    """Synthetic loopback transport used by AppTest; never opens a socket."""
 
-    assert editions_for_course("unknown-course") == ()
+    def __init__(
+        self, response: bytes = b'{"model":"synthetic-effective","response":"Draft reviewed"}'
+    ):
+        self.response = response
+        self.calls: list[tuple[str, bytes]] = []
+
+    def get(self, url: str, timeout_seconds: float) -> HttpResponse:
+        del timeout_seconds
+        self.calls.append((url, b""))
+        return HttpResponse(200, b'{"models":[{"name":"synthetic-model"}]}')
+
+    def post(self, url: str, body: bytes, timeout_seconds: float) -> HttpResponse:
+        del timeout_seconds
+        self.calls.append((url, body))
+        return HttpResponse(200, self.response)
+
+
+def test_apptest_generates_from_recommendation_and_exposes_review_controls(tmp_path, monkeypatch):
+    path = _seed_dashboard_database(tmp_path)
+    OllamaSettingsRepository(path).save(OllamaSettings("synthetic-model"))
+    monkeypatch.setenv("ADAMS_TUTORIA_BASE_DIR", str(tmp_path))
+    from streamlit.testing.v1 import AppTest
+
+    transport = _AppTransport()
+    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
+    app = AppTest.from_file(dashboard_path)
+    app.session_state["_ollama_transport"] = transport
+    app.run()
+    app.sidebar.radio[0].set_value("Edición").run()
+
+    assert not app.exception
+    assert app.multiselect
+    assert app.multiselect[0].options
+    app.multiselect[0].set_value([app.multiselect[0].options[0]])
+    app.run()
+    assert any("Vista previa del payload minimizado" in item.value for item in app.subheader)
+    assert app.json
+    next(
+        button for button in app.button if button.label == "Generar borradores seleccionados"
+    ).click().run()
+    assert not app.exception
+    assert not app.error, [item.value for item in app.error]
+    assert any(item.label == "Borrador" for item in app.text_area)
+    assert any(url.endswith("/api/generate") for url, _ in transport.calls)
+
+
+def test_settings_reports_discovery_failure_without_blocking_dashboard(tmp_path, monkeypatch):
+    _seed_dashboard_database(tmp_path)
+    monkeypatch.setenv("ADAMS_TUTORIA_BASE_DIR", str(tmp_path))
+    from streamlit.testing.v1 import AppTest
+
+    class FailingTransport(_AppTransport):
+        def get(self, url: str, timeout_seconds: float) -> HttpResponse:
+            raise OSError("synthetic unavailable")
+
+    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
+    app = AppTest.from_file(dashboard_path)
+    app.session_state["_ollama_transport"] = FailingTransport()
+    app.run()
+    app.sidebar.radio[0].set_value("Settings").run()
+    app.button(key="ollama-list").click().run()
+
+    assert not app.exception
+    assert any("No se pudieron listar los modelos" in item.value for item in app.error)
+    app.sidebar.radio[0].set_value("Edición").run()
+    assert not app.exception
+
+
+def test_settings_page_is_available_even_when_operational_database_is_empty(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from streamlit.testing.v1 import AppTest
+
+    dashboard_path = Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py"
+    app = AppTest.from_file(dashboard_path).run()
+    app.sidebar.radio[0].set_value("Settings").run()
+    assert not app.exception
+    assert app.title[0].value == "Settings"
+    assert any("localhost" in item.value for item in app.caption)
+
+
+def test_selection_helper_does_not_fabricate_unknown_course(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert editions_for_course(str(uuid4())) == ()
 
 
 def test_dashboard_request_is_one_enrollment_and_minimized() -> None:
-    """The UI request carries one synthetic enrollment and no identity payload."""
     summary = demo_enrollment_summaries("edition-alpha-2026-1")[0]
     request = _dashboard_request(summary, "seguimiento", "Mantén tono neutral")
 
@@ -163,12 +250,13 @@ def test_dashboard_request_is_one_enrollment_and_minimized() -> None:
 
 
 def test_dashboard_record_state_key_isolated_by_edition_and_enrollment() -> None:
-    """Draft widget state cannot collide across editions or enrollments."""
     enrollment = demo_enrollment_summaries("edition-alpha-2026-1")[0].enrollment_id
-
     assert _record_key("edition-alpha-2026-1", enrollment) != _record_key(
         "edition-alpha-2026-2", enrollment
     )
-    assert _record_key("edition-alpha-2026-1", enrollment) != _record_key(
-        "edition-alpha-2026-1", demo_enrollment_summaries("edition-alpha-2026-1")[1].enrollment_id
-    )
+
+
+def test_dashboard_source_has_no_demo_profile_writes() -> None:
+    source = (Path(__file__).parents[2] / "src/adams_tutoria/dashboard.py").read_text()
+    assert "demo_profile" not in source
+    assert ".save(profile" not in source

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from adams_tutoria.domain import (
     CommunicationRecord,
@@ -213,6 +213,22 @@ class EnrollmentRepository(_Repository):
             else Enrollment(UUID(row["id"]), student, edition, row["external_id"])
         )
 
+    def list_for_edition(
+        self, edition_id: UUID, *, active_only: bool = False
+    ) -> tuple[Enrollment, ...]:
+        """Return persisted enrollments for one edition, never creating records."""
+        with connection(self.path) as db:
+            query = "SELECT id FROM enrollment WHERE edition_id = ?"
+            params: list[str] = [str(edition_id)]
+            if active_only:
+                query += (
+                    " AND COALESCE((SELECT active FROM enrollment_state "
+                    "WHERE enrollment_id = enrollment.id), 1) = 1"
+                )
+            query += " ORDER BY id"
+            ids = [UUID(row["id"]) for row in db.execute(query, params)]
+        return tuple(record for record_id in ids if (record := self.get(record_id)) is not None)
+
 
 class ProgressSnapshotRepository(_Repository):
     table = "progress_snapshot"
@@ -248,6 +264,31 @@ class ProgressSnapshotRepository(_Repository):
         )
 
     def list_for_enrollment(self, enrollment_id: UUID) -> tuple[ProgressSnapshot, ...]:
+        """Read the progress contract used by the dashboard.
+
+        Issue #112 stores the current global value in
+        ``enrollment_progress_current`` rather than in the append-only
+        ``progress_snapshot`` table.  Expose that value as the existing
+        domain projection so consumers do not duplicate the import contract.
+        Historical snapshots remain supported for older/local databases.
+        """
+        with connection(self.path) as db:
+            current = db.execute(
+                "SELECT global_g_percentage, imported_at "
+                "FROM enrollment_progress_current WHERE enrollment_id = ?",
+                (str(enrollment_id),),
+            ).fetchone()
+        if current is not None:
+            enrollment = EnrollmentRepository(self.path).get(enrollment_id)
+            if enrollment is not None:
+                return (
+                    ProgressSnapshot(
+                        uuid5(enrollment_id, "enrollment_progress_current"),
+                        enrollment,
+                        datetime.fromisoformat(current["imported_at"]),
+                        Decimal(current["global_g_percentage"]),
+                    ),
+                )
         with connection(self.path) as db:
             ids = [
                 UUID(row["id"])
@@ -365,6 +406,38 @@ class ContentProgressSnapshotRepository(_Repository):
                 )
             ]
         return tuple(record for record_id in ids if (record := self.get(record_id)) is not None)
+
+    def list_current_for_enrollment(
+        self, enrollment_id: UUID
+    ) -> tuple[ContentProgressSnapshot, ...]:
+        """Project Issue #112 current content-progress rows for read-only consumers."""
+        with connection(self.path) as db:
+            rows = list(
+                db.execute(
+                    "SELECT node_id, pages_percentage, imported_at "
+                    "FROM content_progress_current WHERE enrollment_id = ? ORDER BY node_id",
+                    (str(enrollment_id),),
+                )
+            )
+        enrollment = EnrollmentRepository(self.path).get(enrollment_id)
+        if enrollment is None:
+            return ()
+        node_repository = ContentNodeRepository(self.path)
+        values: list[ContentProgressSnapshot] = []
+        for row in rows:
+            node = node_repository.get(UUID(row["node_id"]))
+            if node is None:
+                continue
+            values.append(
+                ContentProgressSnapshot(
+                    uuid5(enrollment_id, f"content_progress_current:{row['node_id']}"),
+                    enrollment,
+                    node,
+                    datetime.fromisoformat(row["imported_at"]),
+                    Decimal(row["pages_percentage"]),
+                )
+            )
+        return tuple(values)
 
 
 class EvaluationRepository(_Repository):

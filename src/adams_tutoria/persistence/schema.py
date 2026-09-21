@@ -142,6 +142,15 @@ CREATE TABLE IF NOT EXISTS generation_failure (
     id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL REFERENCES enrollment(id),
     occurred_at TEXT NOT NULL, error_code TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ollama_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    model TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    temperature REAL NOT NULL,
+    max_tokens INTEGER NOT NULL,
+    timeout_seconds REAL NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 COURSE_ADDITIONS = {

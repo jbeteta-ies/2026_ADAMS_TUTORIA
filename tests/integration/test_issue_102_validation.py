@@ -4,11 +4,13 @@ These tests deliberately use an injected local-model double.  They never start
 Ollama, open a socket, download a model, or access a remote service.
 """
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
-from adams_tutoria.domain import Course, Edition, Enrollment, Student
+from adams_tutoria.domain import Course, Edition, Enrollment, Student, TutorAction
 from adams_tutoria.generation import (
     DraftGenerationRequest,
     DraftGenerationService,
@@ -26,6 +28,7 @@ from adams_tutoria.persistence.repositories import (
     EnrollmentRepository,
     GenerationRepository,
     StudentRepository,
+    TutorActionRepository,
 )
 
 
@@ -52,9 +55,9 @@ class SyntheticGenerator:
     model_name = "synthetic-model"
 
     def __init__(self) -> None:
-        self.payloads: list[dict] = []
+        self.payloads: list[Mapping[str, Any]] = []
 
-    def generate(self, payload: dict) -> str:
+    def generate(self, payload: Mapping[str, Any]) -> str:
         self.payloads.append(payload)
         if len(self.payloads) == 2:
             raise RuntimeError("synthetic transport failure")
@@ -130,3 +133,64 @@ def test_ollama_contract_uses_only_injected_transport(tmp_path: Path) -> None:
     assert calls[0][0] == "http://localhost:11434/api/generate"
     assert b'"stream":false' in calls[0][1]
     assert calls[0][2] == 30.0
+
+
+def test_mock_generation_records_effective_model_and_never_delivers(tmp_path: Path) -> None:
+    first, _ = _enrollments(tmp_path / "model-trace.sqlite3")
+    transport = type(
+        "Transport",
+        (),
+        {
+            "post": lambda self, url, body, timeout_seconds: HttpResponse(
+                200, b'{"model":"synthetic-effective","response":"Draft for review"}'
+            )
+        },
+    )()
+    generator = OllamaGenerator(OllamaConfig("synthetic-configured"), transport)
+    repository = GenerationRepository(tmp_path / "model-trace.sqlite3")
+    result = DraftGenerationService(generator, repository).generate(
+        [_request(first, "synthetic reason")]
+    )
+
+    assert result.records[0].model_name == "synthetic-effective"
+    assert result.records[0].status is GenerationStatus.GENERATED
+    assert not hasattr(generator, "send")
+    assert not (tmp_path / "model-trace.sqlite3").read_bytes().find(b"SMTP") >= 0
+
+
+def test_human_review_copy_discard_and_action_audit_are_local_only(tmp_path: Path) -> None:
+    path = tmp_path / "human-controls.sqlite3"
+    first, second = _enrollments(path)
+    repository = GenerationRepository(path)
+    generator = SyntheticGenerator()
+    service = DraftGenerationService(generator, repository)
+    generated = service.generate([_request(first, "synthetic review")]).records[0]
+
+    repository.transition(
+        generated.id, GenerationStatus.REVIEWED, datetime(2026, 10, 2, tzinfo=UTC)
+    )
+    repository.transition(
+        generated.id,
+        GenerationStatus.EDITED,
+        datetime(2026, 10, 3, tzinfo=UTC),
+        "Edited synthetic draft",
+    )
+    repository.transition(generated.id, GenerationStatus.COPIED, datetime(2026, 10, 4, tzinfo=UTC))
+    copied = repository.get(generated.id)
+    assert copied is not None and copied.status is GenerationStatus.COPIED
+
+    discarded = (
+        DraftGenerationService(SyntheticGenerator(), repository)
+        .generate([_request(second, "synthetic discard")])
+        .records[0]
+    )
+    repository.transition(
+        discarded.id, GenerationStatus.DISCARDED, datetime(2026, 10, 2, tzinfo=UTC)
+    )
+    assert repository.get(discarded.id).status is GenerationStatus.DISCARDED  # type: ignore[union-attr]
+
+    actions = TutorActionRepository(path)
+    action = TutorAction(uuid4(), first.id, datetime(2026, 10, 4, tzinfo=UTC), "Revisar borrador")
+    actions.save(action)
+    assert actions.list_for_enrollment(first.id) == (action,)
+    assert repository.history(generated.id)[-1].to_status is GenerationStatus.COPIED

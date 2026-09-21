@@ -446,7 +446,12 @@ class DraftGenerationService:
                     draft,
                     self._clock(),
                     _record_context(prompt.context),
-                    model_name=getattr(self._generator, "model_name", "unknown"),
+                    model_name=getattr(
+                        self._generator,
+                        "last_used_model",
+                        getattr(self._generator, "model_name", "unknown"),
+                    )
+                    or getattr(self._generator, "model_name", "unknown"),
                     prompt_version=prompt.version,
                 )
                 self._repository.save(record)
@@ -474,6 +479,8 @@ class OllamaConfig:
     model: str
     endpoint: str = "http://localhost:11434"
     timeout_seconds: float = 30.0
+    temperature: float = 0.2
+    max_tokens: int = 512
     max_request_bytes: int = 16_384
     max_response_bytes: int = 65_536
     max_output_characters: int = 16_000
@@ -483,6 +490,10 @@ class OllamaConfig:
             raise GenerationConfigurationError("model must be non-blank and at most 200 characters")
         if self.timeout_seconds <= 0 or self.timeout_seconds > 300:
             raise GenerationConfigurationError("timeout_seconds must be between 0 and 300")
+        if not 0 <= self.temperature <= 2:
+            raise GenerationConfigurationError("temperature must be between 0 and 2")
+        if not 1 <= self.max_tokens <= 16_000:
+            raise GenerationConfigurationError("max_tokens must be between 1 and 16000")
         if self.max_request_bytes <= 0 or self.max_response_bytes <= 0:
             raise GenerationConfigurationError("request and response limits must be positive")
         if self.max_output_characters <= 0:
@@ -538,6 +549,16 @@ class UrllibTransport:
         except (URLError, TimeoutError, OSError) as exc:
             raise GenerationTransportError("local generation transport failed") from exc
 
+    def get(self, url: str, timeout_seconds: float) -> HttpResponse:
+        request = Request(url, method="GET")
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
+                return HttpResponse(response.status, response.read())
+        except HTTPError as exc:
+            raise GenerationTransportError(f"local discovery HTTP status {exc.code}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise GenerationTransportError("local discovery transport failed") from exc
+
 
 class OllamaGenerator:
     """Ollama adapter for the local ``/api/generate`` endpoint."""
@@ -545,14 +566,27 @@ class OllamaGenerator:
     def __init__(self, config: OllamaConfig, transport: HttpTransport | None = None) -> None:
         self.config = config
         self._transport = transport or UrllibTransport()
+        self._last_used_model: str | None = None
 
     @property
     def model_name(self) -> str:
         return self.config.model
 
+    @property
+    def last_used_model(self) -> str | None:
+        return self._last_used_model
+
     def generate(self, payload: Mapping[str, Any]) -> str:
         prompt = payload_json(payload)
-        request = {"model": self.config.model, "prompt": prompt, "stream": False}
+        request = {
+            "model": self.config.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": self.config.temperature,
+                "num_predict": self.config.max_tokens,
+            },
+        }
         body = json.dumps(request, separators=(",", ":")).encode("utf-8")
         if len(body) > self.config.max_request_bytes:
             raise GenerationConfigurationError("generation request exceeds configured limit")
@@ -572,4 +606,10 @@ class OllamaGenerator:
             raise GenerationResponseError("local generation response has no text")
         if len(result) > self.config.max_output_characters:
             raise GenerationResponseError("generated text exceeds configured limit")
+        reported_model = decoded.get("model")
+        if reported_model is not None and (
+            not isinstance(reported_model, str) or not reported_model.strip()
+        ):
+            raise GenerationResponseError("generation response has an invalid model")
+        self._last_used_model = reported_model or self.config.model
         return result
