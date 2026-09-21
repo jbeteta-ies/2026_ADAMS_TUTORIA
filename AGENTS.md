@@ -485,6 +485,12 @@ A Milestone may only be considered complete when:
 
 # Agent Roles
 
+The concrete model configuration is defined in:
+- .opencode/agents/validator.md
+- .opencode/agents/reviewer.md
+
+This section documents the intended roles, not the runtime provider configuration.
+
 ## Planner
 
 Primary model: Nemotron Ultra
@@ -552,7 +558,7 @@ The Implementer must not make material architectural decisions outside the appro
 
 ## Validator
 
-Primary model: Muse
+Primary model: OpenAI GPT-5.6 Luna
 
 Responsibilities:
 
@@ -570,7 +576,7 @@ The Validator must not silently repair defects.
 
 ## Reviewer
 
-Primary model: Big Pickle
+Primary model: GitHub Copilot MAI-Code-1.1-Flash
 
 Responsibilities:
 
