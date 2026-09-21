@@ -44,6 +44,34 @@ Human approval is mandatory at two points:
 1. before implementation begins
 2. before a Pull Request is merged
 
+### Narrow harness-maintenance exception
+
+The ordinary Issue workflow above remains mandatory for all application work,
+documentation work, and other non-trivial changes. A narrow exception is
+allowed only when an explicitly approved plan requests a correction to the
+repository harness itself (for example, agent configuration or workflow
+instructions) and no suitable GitHub Issue exists for that correction.
+
+For that exception only:
+
+- work must be performed on the specifically prepared branch
+  `harness/fix-agents-models`;
+- the implementer must modify only the files explicitly authorized by the
+  approved plan and must preserve all pre-existing work on the branch;
+- the exception does not authorize application changes, unrelated cleanup,
+  branch creation, rebasing, resets, or destructive working-tree operations;
+- independent Validator and Reviewer gates remain required;
+- a Pull Request against `main` and explicit human approval remain required
+  before merge; and
+- no agent may commit, push, open or update a Pull Request, merge, or clean up
+  the branch unless that action is separately authorized by the applicable
+  workflow gate.
+
+This exception does not waive validation, review, Pull Request, human-approval,
+or merge protections, and it must not be used to bypass the normal Issue
+workflow when an Issue exists or when the change is outside harness
+maintenance.
+
 ---
 
 # Mandatory Planning Gate
@@ -122,6 +150,13 @@ Issue
 → Cleanup
 
 The Planner remains responsible for coordination throughout the workflow.
+
+The approved implementation plan and the Validator's final validation report
+are mandatory workflow artifacts. They must exist and be consulted as part of
+the workflow, but they do not require separate versioned files when the
+approved plan limits the change to `AGENTS.md`; in that case, they may remain
+in the workflow record and Pull Request evidence rather than being added to
+the repository.
 
 ---
 
@@ -369,12 +404,28 @@ The GitHub Manager must:
    - implementation summary
    - validation report
    - any relevant reviewer notes
+   - unequivocal evidence of the approved plan, the validation result, the
+     Reviewer result, and the exact scope of the change
 9. Verify Pull Request state using `gh`.
 10. Stop.
+
+The Pull Request description is the required durable summary of that evidence:
+it must identify the approved plan, state the Validator's final result, state
+the Reviewer's result, and explicitly identify the files and scope changed.
+For the narrow harness-maintenance exception, it must also make clear that
+the approved plan authorized the harness-only scope and that no other files
+were changed. These requirements apply even when the plan does not require
+the plan or validation report to be committed as separate files.
 
 Do not merge automatically.
 
 Do not close the Issue before the authorized workflow permits it.
+
+For the narrow harness-maintenance exception, the corresponding Pull Request
+must identify the approved harness plan, the preserved branch
+`harness/fix-agents-models`, the Validator result, and the Reviewer result.
+The same human Pull Request approval and merge gates apply; the exception does
+not permit direct integration into `main`.
 
 ---
 
@@ -552,7 +603,7 @@ The Implementer must not make material architectural decisions outside the appro
 
 ## Validator
 
-Primary model: Muse
+Primary model: `openai/gpt-5.6-luna`
 
 Responsibilities:
 
@@ -570,7 +621,7 @@ The Validator must not silently repair defects.
 
 ## Reviewer
 
-Primary model: Big Pickle
+Primary model: `github-copilot/mai-code-1.1-flash`
 
 Responsibilities:
 
@@ -761,4 +812,4 @@ The first development Issue is expected to establish:
 - Python version
 - dependency management
 - isolated environment
-- minimal executable application 
+- minimal executable application
