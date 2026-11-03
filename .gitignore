@@ -90,6 +90,7 @@ data/processed/
 # Local configuration and secrets
 .env
 .env.*
+!.env.example
 
 # Flask stuff:
 instance/
