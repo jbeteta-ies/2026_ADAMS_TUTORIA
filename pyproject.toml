@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 authors = [
     {name = "Javier", email = "javier@example.com"}
 ]
-dependencies = ["openpyxl>=3.1.5", "streamlit>=1.43,<2"]
+dependencies = ["openpyxl>=3.1.5", "playwright>=1.50,<2", "streamlit>=1.43,<2"]
 license = {text = "MIT"}
 
 [build-system]
