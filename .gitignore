@@ -91,6 +91,7 @@ data/processed/
 .env
 .env.*
 !.env.example
+config.yaml
 
 # Flask stuff:
 instance/
