@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 authors = [
     {name = "Javier", email = "javier@example.com"}
 ]
-dependencies = ["openpyxl>=3.1.5", "playwright>=1.50,<2", "streamlit>=1.43,<2"]
+dependencies = ["openpyxl>=3.1.5", "playwright>=1.50,<2", "python-dotenv>=1.0,<2", "streamlit>=1.43,<2"]
 license = {text = "MIT"}
 
 [build-system]
@@ -16,6 +16,7 @@ build-backend = "uv_build"
 
 [project.scripts]
 adams-tutoria = "adams_tutoria.__main__:main"
+adams-login = "adams_tutoria.adams_login_cli:main"
 
 [dependency-groups]
 dev = ["pytest", "ruff", "mypy"]

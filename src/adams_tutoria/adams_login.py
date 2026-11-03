@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -20,11 +20,8 @@ class AdamsLoginSettings:
     interval_seconds: int = 300
 
     @classmethod
-    def from_environment(
-        cls, environ: dict[str, str] | None = None, *, env_file: Path | None = None
-    ) -> AdamsLoginSettings:
-        values = _read_env_file(env_file) if env_file else {}
-        values.update(os.environ if environ is None else environ)
+    def from_environment(cls, environ: Mapping[str, str] | None = None) -> AdamsLoginSettings:
+        values = os.environ if environ is None else environ
         return cls(
             _required(values, "ADAMS_USERNAME"),
             _required(values, "ADAMS_PASSWORD"),
@@ -94,23 +91,11 @@ def login_with_playwright(settings: AdamsLoginSettings) -> LoginResult:
         return perform_login(settings, browser_api=playwright)
 
 
-def _required(values: dict[str, str], name: str) -> str:
+def _required(values: Mapping[str, str], name: str) -> str:
     value = values.get(name, "").strip()
     if not value:
         raise ValueError(f"Falta la variable de configuración {name}.")
     return value
-
-
-def _read_env_file(path: Path) -> dict[str, str]:
-    if not path.exists():
-        return {}
-    values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, value = line.split("=", 1)
-            values[key.strip()] = value.strip().strip("'\"")
-    return values
 
 
 def _validate_url(url: str) -> None:
@@ -131,7 +116,15 @@ def _is_blocked(page: Any) -> bool:
     text = page.locator("body").inner_text().lower()
     return any(
         marker in text
-        for marker in ("captcha", "recaptcha", "two-factor", "mfa", "autenticación multifactor")
+        for marker in (
+            "captcha",
+            "recaptcha",
+            "two-factor",
+            "mfa",
+            "autenticación multifactor",
+            "intervención requerida",
+            "intervention required",
+        )
     )
 
 
