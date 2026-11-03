@@ -149,9 +149,8 @@ migrations. A future Issue may introduce versioned migrations if the schema must
 evolve.
 
 No automatic `.env` loader is used. The login prototype reads a `.env` only when
-its caller explicitly passes that local file to `from_environment`. There are
-no environment variables read at import time. Do not add real secret values to
-environment examples or tracked files.
+the CLI runs. There are no environment variables read at import time. Do not
+add real secret values to environment examples or tracked files.
 
 ### ADAMS login prototype
 
@@ -166,6 +165,21 @@ session. The detector supports the current ADAMS login markup (`nombre`,
 `clave`, and a `Submit` button, including when that button is outside a form
 container). `ADAMS_TARGET_URL` and `ADAMS_INTERVAL_SECONDS` are reserved for
 later Issues and are not used by this prototype.
+
+Run one login attempt from the command line with:
+
+```bash
+uv run adams-login
+```
+
+The command is deliberately **one-shot**: it makes one login attempt, closes
+its ephemeral browser context, prints exactly one safe status, and exits. It
+does not reload pages, retry, poll, monitor ADAMS, read course content, send
+communications, or persist a session. Existing environment variables take
+precedence over `.env`; configuration, browser, and unconfirmed-login errors
+are `failed`, while CAPTCHA, MFA, or required user intervention is `blocked`.
+The latter stops the attempt without any bypass. No login logs are produced by
+this CLI; logging is reserved for a later Issue.
 
 ## Domain model
 

@@ -61,7 +61,28 @@ un servidor, no carga datos y no importa reportes. Es, por tanto, una
 comprobación de instalación y un punto de entrada mínimo del MVP, no un modo
 interactivo.
 
-### 3.2 Dashboard Streamlit
+### 3.2 Login ADAMS one-shot
+
+El login se ejecuta de forma independiente y deliberadamente **one-shot**:
+
+```bash
+uv run adams-login
+```
+
+El comando carga `.env` local si existe (las variables de entorno existentes
+tienen prioridad), realiza un único intento y termina. Su salida contiene solo
+uno de estos estados: `success`, `failed` o `blocked`. Los errores de
+configuración, navegador o login no confirmado se clasifican como `failed`.
+CAPTCHA, MFA o cualquier intervención requerida se clasifica como `blocked` y
+detiene el flujo sin bypass.
+
+Este comando no hace recargas, reintentos, polling ni monitorización; tampoco
+lee cursos, tareas, progreso o evaluaciones, envía comunicaciones ni persiste
+credenciales, cookies o sesiones. No genera logs: esa capacidad queda
+reservada para una Issue posterior. Prepara `.env` solo en tu copia local a
+partir de `.env.example` y nunca incluyas sus valores reales en el repositorio.
+
+### 3.3 Dashboard Streamlit
 
 Arranca el dashboard desde la raíz del repositorio:
 
