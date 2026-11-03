@@ -1,0 +1,18 @@
+# Copy this file to config.yaml and replace placeholders locally.
+# config.yaml is ignored; never add real credentials to this repository.
+schema_version: 1
+sites:
+  - id: demo-site
+    provider: ADAMS
+    login_url: https://example.invalid/login
+    target_url: https://example.invalid/course
+    username: synthetic-user
+    password: replace-locally
+    start_date: "2026-01-01"
+    end_date: "2026-12-31"
+    weekdays: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY]
+    start_time: "08:00"
+    end_time: "20:00"
+    timezone: Europe/Madrid
+    interval_seconds: 300
+    log_file: data/local/logs/demo-site.log
