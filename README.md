@@ -87,6 +87,24 @@ uv run mypy src
 
 ## Configuration
 
+### Local sites YAML
+
+`config.yaml.example` documents the ignored local `config.yaml` contract. Copy
+the example locally and replace only its placeholders; no credentials or
+cookies belong in tracked files. `adams_tutoria.config.load_sites_config(path)`
+uses `yaml.safe_load` and returns frozen typed records. The schema requires
+`schema_version: 1`, a non-empty list of sites, and unique `id` values.
+
+Each site requires `id`, `provider`, `login_url`, `target_url`, `username`, and
+`password`. Optional dates use `YYYY-MM-DD`; `weekdays` defaults to every day;
+times default to `00:00`–`23:59:59`; `timezone` defaults to `UTC` and must be an
+IANA timezone; `interval_seconds` defaults to 300 and must be positive; and
+`log_file` defaults to a relative `data/local/logs/<id>.log` path. URLs must be
+HTTP(S) URLs without embedded credentials. Unknown fields, unsafe log paths,
+duplicate IDs, invalid dates/times, and invalid timezones are rejected without
+including password values in errors. This issue defines the contract only; it
+does not perform login, monitoring, reloading, scheduling, or logging.
+
 The standard-library configuration layer is available through
 `adams_tutoria.config`:
 
