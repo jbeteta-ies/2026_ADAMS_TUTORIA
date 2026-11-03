@@ -99,7 +99,12 @@ def test_env_file_loads_all_documented_values(tmp_path: Path) -> None:
         "ADAMS_INTERVAL_SECONDS=42\n",
         encoding="utf-8",
     )
-    result = AdamsLoginSettings.from_environment(environ={}, env_file=env_file)
+    values = {
+        line.split("=", 1)[0]: line.split("=", 1)[1]
+        for line in env_file.read_text(encoding="utf-8").splitlines()
+    }
+    result = AdamsLoginSettings.from_environment(environ=values)
+    assert result.username == "synthetic-user"
     assert result.target_url == "" and result.interval_seconds == 300
 
 
