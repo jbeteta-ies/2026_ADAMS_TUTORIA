@@ -148,8 +148,24 @@ contain no real student data. This implementation uses no WAL mode, ORM, or
 migrations. A future Issue may introduce versioned migrations if the schema must
 evolve.
 
-No `.env` loader is used. Do not add real secret values to environment examples
-or tracked files. There are no environment variables read at import time.
+No automatic `.env` loader is used. The login prototype reads a `.env` only when
+its caller explicitly passes that local file to `from_environment`. There are
+no environment variables read at import time. Do not add real secret values to
+environment examples or tracked files.
+
+### ADAMS login prototype
+
+Create `.env` locally by copying `.env.example` and replacing its placeholders.
+`.env` is ignored by Git and must never be versioned, committed, or shared; only
+`.env.example` is versioned. Do not create or populate `.env` in a pull request.
+Install the browser with `uv run playwright install chromium`, then call
+`login_with_playwright` from `adams_tutoria.adams_login`. The prototype opens
+one ephemeral browser context, submits only the login form, reports success,
+failure, or CAPTCHA/MFA blocking, and closes the context without persisting a
+session. The detector supports the current ADAMS login markup (`nombre`,
+`clave`, and a `Submit` button, including when that button is outside a form
+container). `ADAMS_TARGET_URL` and `ADAMS_INTERVAL_SECONDS` are reserved for
+later Issues and are not used by this prototype.
 
 ## Domain model
 
