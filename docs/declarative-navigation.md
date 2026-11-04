@@ -42,6 +42,34 @@ redirecciones, expiración de sesión y señales estables de éxito.
 CAPTCHA/MFA no se sortea. La cancelación es cooperativa mediante `Event`; un
 timeout, error, sesión expirada o señal no confirmada detiene la secuencia.
 
+## Metadatos seguros de la Issue #144
+
+Los diagnósticos de respuesta se escriben únicamente mediante una allowlist
+cerrada. El identificador de paso se deriva exclusivamente de su orden
+validado y tiene exactamente la forma `step-1`, `step-2`, etc.; no se aceptan
+sufijos, hashes ni identificadores alternativos. Los campos permitidos son
+`step`, `phase`, `method`, `status_code`, `expected_result_match`,
+`redirected`, `duration` y `result`.
+
+Los valores están restringidos a tipos y rangos controlados: las fases son
+`login`, `navigation` o `reload`; los métodos son `GET` o `POST`; el código
+HTTP es nulo o un entero entre 100 y 599; la coincidencia es `yes`, `no` o
+`not_checkable`; `redirected` es estrictamente booleano; `duration` es un
+número finito entre 0 y 86.400 segundos; y el resultado es `ok`, `failed`,
+`blocked` o `timeout`. La redirección se registra como booleano derivado en
+memoria, sin guardar la URL de origen ni la de destino.
+
+`human_intervention_required` se traduce a la categoría controlada `blocked`
+con un mensaje genérico. El logging sigue siendo no bloqueante: los errores
+de diagnóstico o escritura no detienen la monitorización ni provocan reintentos
+indefinidos, y se conserva la compatibilidad con escritores históricos.
+
+Se excluyen expresamente cuerpos HTML/JSON, formularios, cabeceras completas,
+cookies, tokens, credenciales, URLs completas, parámetros sensibles y
+cualquier dato personal o informe de estudiantes. Esta documentación y sus
+pruebas usan únicamente valores sintéticos; no se ejecuta ADAMS real ni se
+lee `config.yaml` local.
+
 ## Plantilla YAML
 
 `config.yaml.example` incluye, dentro del elemento sintético de `sites`, una

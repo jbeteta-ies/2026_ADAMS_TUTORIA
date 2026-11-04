@@ -363,6 +363,15 @@ def test_failure_categories_are_safe_and_phase_specific(tmp_path) -> None:
     )
 
 
+def test_human_intervention_diagnostic_is_mapped_to_controlled_blocked_category() -> None:
+    from adams_tutoria.monitoring import _safe_diagnostic
+
+    assert _safe_diagnostic("human_intervention_required", "navigation", "error") == (
+        "blocked",
+        "Intervención humana requerida.",
+    )
+
+
 def test_configured_log_path_and_early_failure_diagnostic_are_safe(tmp_path, monkeypatch) -> None:
     configured_path = tmp_path / "configured" / "monitor.log"
     configured = SiteConfig(

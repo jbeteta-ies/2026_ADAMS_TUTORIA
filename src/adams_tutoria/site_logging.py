@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Final
 
 from adams_tutoria.config import SiteConfig
+from adams_tutoria.response_metadata import ResponseMetadataDict, validate_response_metadata
 
 _MAX_BYTES: Final = 1_048_576
 _BACKUP_COUNT: Final = 3
@@ -72,6 +73,7 @@ class SiteLogWriter:
         category: str | None = None,
         message: str | None = None,
         error: str | None = None,
+        response_metadata: ResponseMetadataDict | None = None,
     ) -> bool:
         """Persist one safe event, returning ``False`` if local logging failed."""
         if action not in _ACTIONS or result not in {"success", "error"}:
@@ -82,7 +84,9 @@ class SiteLogWriter:
             message = "Registro local no disponible."
         if result == "error" and (category not in _CATEGORIES or message not in _MESSAGES):
             return False
-        record = {
+        if response_metadata is not None and not validate_response_metadata(response_metadata):
+            return False
+        record: dict[str, object] = {
             "timestamp": datetime.now(UTC).isoformat(),
             "site_id": _safe_label(self._site.id),
             "provider": _safe_label(self._site.provider),
@@ -93,6 +97,8 @@ class SiteLogWriter:
             assert category is not None and message is not None
             record["category"] = category
             record["message"] = message
+        if response_metadata is not None:
+            record["response_metadata"] = response_metadata
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             handler = RotatingFileHandler(
@@ -124,7 +130,7 @@ class SiteLogWriter:
                 continue
 
 
-def _json_record(record: dict[str, str]) -> LogRecord:
+def _json_record(record: dict[str, object]) -> LogRecord:
     """Return a logging record compatible with ``Handler.emit``."""
     message = json.dumps(record, ensure_ascii=True, separators=(",", ":"))
     return logging.LogRecord("adams_tutoria.site", logging.INFO, __file__, 0, message, (), None)
