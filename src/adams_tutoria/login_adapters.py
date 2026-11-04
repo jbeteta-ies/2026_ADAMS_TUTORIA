@@ -11,7 +11,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
-from adams_tutoria.adams_login import AdamsLoginSettings, LoginResult, perform_login
+from adams_tutoria.adams_login import (
+    AdamsLoginSettings,
+    LoginResult,
+    LoginSession,
+    perform_login,
+    perform_login_session,
+)
 from adams_tutoria.config import SiteConfig
 
 
@@ -39,12 +45,17 @@ class LoginRequest:
     password: str
     login_url: str
     target_url: str = ""
+    timeout_seconds: int = 30
 
 
 class LoginAdapter(Protocol):
     """Common contract independent of a provider's HTML or selectors."""
 
     def login(self, request: LoginRequest, *, browser_api: Any | None = None) -> LoginOutcome: ...
+
+    def login_session(
+        self, request: LoginRequest, *, browser_api: Any
+    ) -> tuple[LoginOutcome, LoginSession | None]: ...
 
 
 class UnknownProviderError(ValueError):
@@ -56,7 +67,11 @@ class AdamsLoginAdapter:
 
     def login(self, request: LoginRequest, *, browser_api: Any | None = None) -> LoginOutcome:
         settings = AdamsLoginSettings(
-            request.username, request.password, request.login_url, request.target_url
+            request.username,
+            request.password,
+            request.login_url,
+            request.target_url,
+            timeout_seconds=request.timeout_seconds,
         )
         try:
             result = (
@@ -68,6 +83,22 @@ class AdamsLoginAdapter:
             return LoginOutcome(LoginStatus.FAILED, "No se pudo completar el login.")
         return _outcome(result)
 
+    def login_session(
+        self, request: LoginRequest, *, browser_api: Any
+    ) -> tuple[LoginOutcome, LoginSession | None]:
+        settings = AdamsLoginSettings(
+            request.username,
+            request.password,
+            request.login_url,
+            request.target_url,
+            timeout_seconds=request.timeout_seconds,
+        )
+        try:
+            result, session = perform_login_session(settings, browser_api=browser_api)
+        except Exception:
+            return LoginOutcome(LoginStatus.FAILED, "No se pudo completar el login."), None
+        return _outcome(result), session
+
 
 class UnimplementedLoginAdapter:
     """Reserved provider entry point; no login flow is attempted."""
@@ -75,6 +106,14 @@ class UnimplementedLoginAdapter:
     def login(self, request: LoginRequest, *, browser_api: Any | None = None) -> LoginOutcome:
         del request, browser_api
         return LoginOutcome(LoginStatus.FAILED, "El proveedor de login aún no está implementado.")
+
+    def login_session(
+        self, request: LoginRequest, *, browser_api: Any
+    ) -> tuple[LoginOutcome, None]:
+        del request, browser_api
+        return LoginOutcome(
+            LoginStatus.FAILED, "El proveedor de login aún no está implementado."
+        ), None
 
 
 def _playwright_login(settings: AdamsLoginSettings) -> LoginResult:
@@ -100,7 +139,9 @@ def _outcome(result: LoginResult) -> LoginOutcome:
 def request_from_site(site: SiteConfig) -> LoginRequest:
     """Build an ephemeral adapter request from validated site configuration."""
 
-    return LoginRequest(site.username, site.password, site.login_url, site.target_url)
+    return LoginRequest(
+        site.username, site.password, site.login_url, site.target_url, site.timeout_seconds
+    )
 
 
 _FACTORIES: Mapping[str, Callable[[], LoginAdapter]] = {

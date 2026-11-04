@@ -35,6 +35,8 @@ _SITE_FIELDS = frozenset(
         "end_time",
         "timezone",
         "interval_seconds",
+        "timeout_seconds",
+        "max_retries",
         "log_file",
     }
 )
@@ -59,6 +61,8 @@ class SiteConfig:
     end_time: time = time(23, 59, 59)
     timezone: str = "UTC"
     interval_seconds: int = 300
+    timeout_seconds: int = 30
+    max_retries: int = 2
     log_file: Path = Path("data/local/logs/site.log")
 
 
@@ -187,6 +191,12 @@ def _site(value: Any) -> SiteConfig:
     interval = data.get("interval_seconds", 300)
     if isinstance(interval, bool) or not isinstance(interval, int) or interval < 1:
         raise _error("interval_seconds must be a positive integer")
+    timeout = data.get("timeout_seconds", 30)
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
+        raise _error("timeout_seconds must be a positive integer")
+    retries = data.get("max_retries", 2)
+    if isinstance(retries, bool) or not isinstance(retries, int) or not 0 <= retries <= 5:
+        raise _error("max_retries must be an integer between 0 and 5")
     timezone = _text(data, "timezone") if "timezone" in data else "UTC"
     assert timezone is not None
     try:
@@ -217,6 +227,8 @@ def _site(value: Any) -> SiteConfig:
         end_time,
         timezone,
         interval,
+        timeout,
+        retries,
         log_file,
     )
 
