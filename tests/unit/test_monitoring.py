@@ -118,11 +118,13 @@ def test_multisite_monitor_emits_navigation_success_after_login_and_reload(
         def inner_text(self) -> str:
             return self.body
 
-        def goto(self, url: str, **kwargs: object) -> Response:
-            assert kwargs["method"] == "GET"
+        def goto(self, url: str, *, timeout: int) -> Response:
+            assert timeout == 30_000
             self.navigation_calls += 1
             self.url = url
-            return Response()
+            response = Response()
+            response.url = url
+            return response
 
     class NavigationSession(Session):
         def __init__(self) -> None:

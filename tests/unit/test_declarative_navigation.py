@@ -18,6 +18,10 @@ from adams_tutoria.declarative_navigation import (
 
 class Response:
     status = 200
+    url = "https://synthetic.invalid/target"
+
+    def text(self) -> str:
+        return "Synthetic target"
 
 
 class Locator:
@@ -49,15 +53,40 @@ class Page:
     def locator(self, selector: str) -> Locator | Body:
         return Body(self) if selector == "body" else Locator()
 
-    def goto(self, url: str, **kwargs: object) -> Response:
-        self.calls.append({"url": url, **kwargs})
+    def goto(self, url: str, *, timeout: int) -> Response:
+        self.calls.append({"url": url, "timeout": timeout})
         self.url = url
-        return Response()
+        response = Response()
+        response.url = url
+        return response
 
 
 class Session:
     def __init__(self) -> None:
         self.page = Page()
+        self.context = AuthenticatedContext()
+        self.request_context = self.context.request
+
+
+class RequestContext:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> Response:
+        self.calls.append({"url": url, **kwargs})
+        response = Response()
+        response.url = url
+        return response
+
+
+class AuthenticatedContext:
+    def __init__(self) -> None:
+        self.request = RequestContext()
+        self.cookies_copied = False
+
+    def cookies(self) -> None:
+        self.cookies_copied = True
+        raise AssertionError("navigation must not copy or persist cookies")
 
 
 def plan(*steps: NavigationStep) -> NavigationPlan:
@@ -78,17 +107,44 @@ def test_order_methods_params_form_and_expected_result() -> None:
             NavigationStep(
                 2,
                 "POST",
-                "https://synthetic.invalid/target",
+                "https://synthetic.invalid/select",
                 form_data={"choice": "synthetic", "csrf": "placeholder"},
                 expected=ExpectedResult(status_code=200),
                 read_only=True,
             ),
+            NavigationStep(
+                3,
+                "GET",
+                "https://synthetic.invalid/target",
+                expected=ExpectedResult(url_path="/target"),
+            ),
         )
     )
-    assert [item.status for item in result] == [NavigationStatus.SUCCESS, NavigationStatus.SUCCESS]
+    assert [item.status for item in result] == [
+        NavigationStatus.SUCCESS,
+        NavigationStatus.SUCCESS,
+        NavigationStatus.SUCCESS,
+    ]
     assert session.page.calls[0]["url"] == "https://synthetic.invalid/room?course=demo"
-    assert session.page.calls[1]["method"] == "POST"
-    assert session.page.calls[1]["post_data"] == "choice=synthetic&csrf=placeholder"
+    assert len(session.page.calls) == 2
+    assert session.request_context.calls[0] == {
+        "url": "https://synthetic.invalid/select",
+        "form": {"choice": "synthetic", "csrf": "placeholder"},
+        "timeout": 30_000,
+    }
+    assert session.page.calls[0] == {
+        "url": "https://synthetic.invalid/room?course=demo",
+        "timeout": 30_000,
+    }
+
+
+def test_page_goto_mock_rejects_http_method_and_post_data_arguments() -> None:
+    page = Page()
+
+    with pytest.raises(TypeError):
+        page.goto("https://synthetic.invalid/target", timeout=1_000, method="POST")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        page.goto("https://synthetic.invalid/target", timeout=1_000, post_data="choice=demo")  # type: ignore[call-arg]
 
 
 def test_csrf_field_is_read_from_current_page_without_logging_it() -> None:
@@ -99,7 +155,7 @@ def test_csrf_field_is_read_from_current_page_without_logging_it() -> None:
                 1,
                 "POST",
                 "https://synthetic.invalid/next",
-                {"tab": "one"},
+                {},
                 {"choice": "demo"},
                 csrf_field="csrf",
                 expected=ExpectedResult(status_code=200),
@@ -108,7 +164,57 @@ def test_csrf_field_is_read_from_current_page_without_logging_it() -> None:
         )
     )
     assert result[0].status is NavigationStatus.SUCCESS
-    assert session.page.calls[0]["post_data"] == "choice=demo&csrf=csrf-synthetic"
+    assert session.request_context.calls[0]["form"] == {
+        "choice": "demo",
+        "csrf": "csrf-synthetic",
+    }
+
+
+def test_post_uses_authenticated_context_request_without_copying_cookies() -> None:
+    session = Session()
+    result = NavigationExecutor(session).execute(
+        plan(
+            NavigationStep(
+                1,
+                "POST",
+                "https://synthetic.invalid/next",
+                form_data={"choice": "demo"},
+                expected=ExpectedResult(status_code=200),
+                read_only=True,
+            )
+        )
+    )
+
+    assert result[0].status is NavigationStatus.SUCCESS
+    assert session.request_context is session.context.request
+    assert session.context.cookies_copied is False
+
+
+def test_post_request_error_is_reported_without_real_request() -> None:
+    class FailingRequestContext(RequestContext):
+        def post(self, url: str, **kwargs: object) -> Response:
+            del url, kwargs
+            raise RuntimeError("synthetic POST failure")
+
+    session = Session()
+    session.context.request = FailingRequestContext()
+    session.request_context = session.context.request
+    result = NavigationExecutor(session).execute(
+        plan(
+            NavigationStep(
+                1,
+                "POST",
+                "https://synthetic.invalid/next",
+                form_data={"choice": "demo"},
+                expected=ExpectedResult(status_code=200),
+                read_only=True,
+            )
+        )
+    )
+
+    assert result[0].status is NavigationStatus.FAILED
+    assert result[0].code == "navigation_error"
+    assert result[0].response_metadata["method"] == "POST"  # type: ignore[index]
 
 
 @pytest.mark.parametrize(
@@ -208,6 +314,32 @@ def test_validator_rejects_post_without_explicit_read_only_authorization() -> No
                     "https://synthetic.invalid/target",
                     form_data={"choice": "synthetic"},
                     expected=ExpectedResult(status_code=200),
+                )
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "method, params, form_data",
+    [
+        ("POST", {"query": "synthetic"}, {"choice": "synthetic"}),
+        ("GET", {}, {"choice": "synthetic"}),
+    ],
+)
+def test_validator_separates_query_params_and_post_form_data(
+    method: str, params: dict[str, str], form_data: dict[str, str]
+) -> None:
+    with pytest.raises(NavigationError):
+        NavigationPlanValidator().validate(
+            plan(
+                NavigationStep(
+                    1,
+                    method,
+                    "https://synthetic.invalid/target",
+                    params,
+                    form_data,
+                    expected=ExpectedResult(status_code=200),
+                    read_only=method == "POST",
                 )
             )
         )
@@ -376,7 +508,7 @@ def test_response_metadata_marks_internal_and_external_redirects() -> None:
         )
     )[0]
     assert internal.response_metadata["redirected"] is True  # type: ignore[index]
-    assert internal.code == "expected_result_not_confirmed"
+    assert internal.code == "step_succeeded"
 
     session.page.goto = lambda url, **kwargs: RedirectResponse(  # type: ignore[assignment]
         "https://external.invalid/landing"

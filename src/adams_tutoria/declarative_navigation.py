@@ -146,6 +146,10 @@ class NavigationPlanValidator:
                     raise NavigationError("Un POST declarativo requiere read_only: true explícito.")
                 if not step.form_data:
                     raise NavigationError("Un POST declarativo requiere form_data explícito.")
+                if step.params:
+                    raise NavigationError("Los parámetros de query solo se permiten en GET.")
+            elif step.form_data:
+                raise NavigationError("Los datos de formulario solo se permiten en POST.")
 
 
 class NavigationExecutor:
@@ -197,20 +201,29 @@ class NavigationExecutor:
                         started,
                     )
                 data[step.csrf_field] = locator.input_value()
-            from urllib.parse import urlencode
-
-            response = self._session.page.goto(
-                url,
-                method=step.method,
-                post_data=urlencode(data) if data else None,
-                timeout=step.timeout_seconds * 1000,
-            )
+            if step.method == "GET":
+                # page.goto is browser navigation.  It deliberately receives no
+                # HTTP method/body arguments: Playwright only supports GET here.
+                response = self._session.page.goto(url, timeout=step.timeout_seconds * 1000)
+                observed_url = getattr(response, "url", None) or self._session.page.url
+                observed_page = self._session.page
+                response_text = None
+            else:
+                # APIRequestContext belongs to the authenticated browser context,
+                # so its cookie jar is shared without copying or persisting it.
+                response = self._session.request_context.post(
+                    step.url,
+                    form=data,
+                    timeout=step.timeout_seconds * 1000,
+                )
+                observed_url = getattr(response, "url", None) or step.url
+                observed_page = None
+                response_text = _response_text(response)
             if response is None:
                 code = "no_response"
                 return self._diagnostic(step, code, status, redirected, match, result, started)
-            effective_url = getattr(response, "url", None) or self._session.page.url
-            redirected = _effective_url(effective_url) != _effective_url(url)
-            if _origin(effective_url) != _origin(allowed_origin):
+            redirected = _effective_url(observed_url) != _effective_url(url)
+            if _origin(observed_url) != _origin(allowed_origin):
                 code = "external_redirect"
                 return self._diagnostic(step, code, status, redirected, match, result, started)
             status_value = getattr(response, "status", None)
@@ -221,12 +234,12 @@ class NavigationExecutor:
                 and 100 <= status_value <= 599
                 else None
             )
-            if _blocked(self._session.page):
+            if _blocked(observed_page, response_text):
                 code, result = "human_intervention_required", ResponseResult.BLOCKED
                 return self._diagnostic(
                     step, code, status, redirected, match, result, started, NavigationStatus.BLOCKED
                 )
-            if _looks_like_login(self._session.page):
+            if _looks_like_login(observed_page, response_text):
                 code = "session_expired"
                 return self._diagnostic(
                     step,
@@ -240,7 +253,7 @@ class NavigationExecutor:
                 )
             match = (
                 ExpectedResultMatch.YES
-                if _matches(step.expected, self._session.page, status)
+                if _matches(step.expected, observed_page, observed_url, response_text, status)
                 else ExpectedResultMatch.NO
             )
             if match is ExpectedResultMatch.NO:
@@ -316,13 +329,26 @@ def _with_params(url: str, params: Mapping[str, str]) -> str:
     )
 
 
-def _blocked(page: Any) -> bool:
-    text = page.locator("body").inner_text().lower()
+def _response_text(response: Any) -> str:
+    text = response.text()
+    return text if isinstance(text, str) else ""
+
+
+def _page_or_response_text(page: Any | None, response_text: str | None) -> str:
+    if response_text is not None:
+        return response_text.lower()
+    if page is None:
+        return ""
+    return page.locator("body").inner_text().lower()
+
+
+def _blocked(page: Any | None, response_text: str | None = None) -> bool:
+    text = _page_or_response_text(page, response_text)
     return any(marker in text for marker in _BLOCKED_MARKERS)
 
 
-def _looks_like_login(page: Any) -> bool:
-    text = page.locator("body").inner_text().lower()
+def _looks_like_login(page: Any | None, response_text: str | None = None) -> bool:
+    text = _page_or_response_text(page, response_text)
     return any(marker in text for marker in _LOGIN_MARKERS)
 
 
@@ -333,14 +359,20 @@ def _has_expected_signal(expected: ExpectedResult) -> bool:
     )
 
 
-def _matches(expected: ExpectedResult, page: Any, status: int | None) -> bool:
+def _matches(
+    expected: ExpectedResult,
+    page: Any | None,
+    observed_url: str,
+    response_text: str | None,
+    status: int | None,
+) -> bool:
     if expected.status_code is not None and status != expected.status_code:
         return False
-    if expected.url_path is not None and urlparse(page.url).path != expected.url_path:
+    if expected.url_path is not None and urlparse(observed_url).path != expected.url_path:
         return False
     return not (
         expected.text_marker is not None
-        and expected.text_marker.lower() not in page.locator("body").inner_text().lower()
+        and expected.text_marker.lower() not in _page_or_response_text(page, response_text)
     )
 
 
