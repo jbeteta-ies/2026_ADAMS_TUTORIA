@@ -32,3 +32,20 @@ Al producirse `EXIT`, o al llamar a `close()`, se cierran el contexto y el
 navegador del sitio. El motor no ejecuta acciones de contenido, no persiste
 sesiones, cookies, tokens ni HTML, y sus eventos contienen solo el identificador
 del sitio y estados operativos seguros.
+
+## Logs locales por sitio
+
+Los eventos de `login` y `reload` se escriben en el `log_file` configurado para
+cada sitio como una línea JSON con `timestamp`, `site_id`, `provider`, `action`
+y `result`. Los errores solo usan el diagnóstico fijo `operation failed`; no se
+copian excepciones, URLs, respuestas, HTML, cabeceras, cookies, tokens,
+credenciales ni datos de estudiantes.
+
+Cada fichero rota al alcanzar 1 MiB y conserva como máximo tres copias rotadas.
+La limpieza elimina ficheros con más de 30 días. Los logs viven bajo
+`data/local/`, ignorado por Git; `config.yaml` también permanece ignorado y no
+debe recrearse en el repositorio.
+
+Si el destino no puede escribirse, el monitor emite un evento de error seguro
+para ese sitio y continúa procesando los demás sitios. El fallo del logger no
+propaga excepciones al ciclo de monitorización.
