@@ -13,6 +13,7 @@ from typing import Any
 from adams_tutoria.config import SiteConfig
 from adams_tutoria.login_adapters import LoginAdapter, adapter_for_site, request_from_site
 from adams_tutoria.scheduler import ScheduleEventKind, SiteScheduler
+from adams_tutoria.site_logging import SiteLogWriter
 
 
 class MonitorEventKind(StrEnum):
@@ -43,11 +44,22 @@ class _Runtime:
 class MultiSiteMonitor:
     """Coordinate scheduling, ephemeral login sessions, and safe reloads."""
 
-    def __init__(self, sites: Iterable[SiteConfig], *, browser_factory: Callable[[], Any]) -> None:
+    def __init__(
+        self,
+        sites: Iterable[SiteConfig],
+        *,
+        browser_factory: Callable[[], Any],
+        log_writer_factory: Callable[[SiteConfig], SiteLogWriter] = SiteLogWriter,
+    ) -> None:
         configured_sites = tuple(sites)
         self._scheduler = SiteScheduler(configured_sites)
         self._runtimes: dict[str, _Runtime] = {}
+        self._loggers: dict[str, SiteLogWriter | None] = {}
         for site in configured_sites:
+            try:
+                self._loggers[site.id] = log_writer_factory(site)
+            except Exception:
+                self._loggers[site.id] = None
             try:
                 adapter = adapter_for_site(site)
             except Exception:
@@ -81,7 +93,7 @@ class MultiSiteMonitor:
                 )
         for runtime in self._runtimes.values():
             if runtime.active and runtime.session is not None and monotonic >= runtime.next_reload:
-                events.append(self._reload(runtime, now, monotonic))
+                events.extend(self._reload(runtime, now, monotonic))
         return tuple(events)
 
     def _enter(self, runtime: _Runtime, now: datetime, monotonic: float) -> list[MonitorEvent]:
@@ -105,7 +117,13 @@ class MultiSiteMonitor:
                     runtime.session = session
                     runtime.active = True
                     runtime.next_reload = monotonic + runtime.site.interval_seconds
-                    return [MonitorEvent(runtime.site.id, MonitorEventKind.LOGIN, now)]
+                    return self._logged_events(
+                        runtime,
+                        now,
+                        MonitorEvent(runtime.site.id, MonitorEventKind.LOGIN, now),
+                        action="login",
+                        result="success",
+                    )
                 if outcome.status.value == "blocked":
                     break
             except Exception:
@@ -113,13 +131,21 @@ class MultiSiteMonitor:
             if attempt == runtime.site.max_retries:
                 break
         runtime.active = False
-        return [
+        return self._logged_events(
+            runtime,
+            now,
             MonitorEvent(
-                runtime.site.id, MonitorEventKind.ERROR, now, "Login no confirmado; sitio aislado."
-            )
-        ]
+                runtime.site.id,
+                MonitorEventKind.ERROR,
+                now,
+                "Login no confirmado; sitio aislado.",
+            ),
+            action="login",
+            result="error",
+            error="operation failed",
+        )
 
-    def _reload(self, runtime: _Runtime, now: datetime, monotonic: float) -> MonitorEvent:
+    def _reload(self, runtime: _Runtime, now: datetime, monotonic: float) -> list[MonitorEvent]:
         assert runtime.session is not None
         for attempt in range(runtime.site.max_retries + 1):
             try:
@@ -127,18 +153,86 @@ class MultiSiteMonitor:
                     runtime.site.target_url, timeout_seconds=runtime.site.timeout_seconds
                 )
                 runtime.next_reload = monotonic + runtime.site.interval_seconds
-                return MonitorEvent(runtime.site.id, MonitorEventKind.RELOAD, now)
+                return self._logged_events(
+                    runtime,
+                    now,
+                    MonitorEvent(runtime.site.id, MonitorEventKind.RELOAD, now),
+                    action="reload",
+                    result="success",
+                )
             except Exception:
                 if attempt == runtime.site.max_retries:
                     self._close(runtime)
                     runtime.active = False
-                    return MonitorEvent(
+                    event = MonitorEvent(
                         runtime.site.id,
                         MonitorEventKind.ERROR,
                         now,
                         "Recarga no completada; sitio aislado.",
                     )
+                    return [
+                        event,
+                        *self._logging_diagnostic(
+                            runtime,
+                            now,
+                            action="reload",
+                            result="error",
+                            error="operation failed",
+                        ),
+                    ]
         raise AssertionError("unreachable")
+
+    def _logged_events(
+        self,
+        runtime: _Runtime,
+        now: datetime,
+        event: MonitorEvent,
+        *,
+        action: str,
+        result: str,
+        error: str | None = None,
+    ) -> list[MonitorEvent]:
+        return [
+            event,
+            *self._logging_diagnostic(runtime, now, action=action, result=result, error=error),
+        ]
+
+    def _logged_event(
+        self,
+        runtime: _Runtime,
+        now: datetime,
+        event: MonitorEvent,
+        *,
+        action: str,
+        result: str,
+        error: str | None = None,
+    ) -> MonitorEvent:
+        self._logging_diagnostic(runtime, now, action=action, result=result, error=error)
+        return event
+
+    def _logging_diagnostic(
+        self,
+        runtime: _Runtime,
+        now: datetime,
+        *,
+        action: str,
+        result: str,
+        error: str | None,
+    ) -> list[MonitorEvent]:
+        writer = self._loggers.get(runtime.site.id)
+        if writer is not None:
+            try:
+                if writer.write(action=action, result=result, error=error):
+                    return []
+            except Exception:
+                pass
+        runtime.active = False
+        self._close(runtime)
+        return [
+            MonitorEvent(
+                runtime.site.id, MonitorEventKind.ERROR, now, "Registro local no disponible."
+            )
+        ]
 
     def _close(self, runtime: _Runtime) -> None:
         if runtime.session is not None:
