@@ -46,6 +46,13 @@ class LoginSession:
         self.page = page
         self._closed = False
 
+    @property
+    def request_context(self) -> Any:
+        """The request API bound to this context's in-memory cookie jar."""
+        if self._closed:
+            raise RuntimeError("login session is closed")
+        return self._context.request
+
     def reload(self, url: str, *, timeout_seconds: int) -> None:
         if self._closed:
             raise RuntimeError("login session is closed")
