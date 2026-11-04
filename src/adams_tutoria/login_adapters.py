@@ -140,7 +140,7 @@ def request_from_site(site: SiteConfig) -> LoginRequest:
     """Build an ephemeral adapter request from validated site configuration."""
 
     return LoginRequest(
-        site.username, site.password, site.login_url, site.target_url, site.timeout_seconds
+        site.username, site.password, site.login_url, site.target_url or "", site.timeout_seconds
     )
 
 

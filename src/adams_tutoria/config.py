@@ -14,6 +14,13 @@ from urllib.parse import urlparse
 
 import yaml
 
+from adams_tutoria.declarative_navigation import (
+    ExpectedResult,
+    NavigationError,
+    NavigationPlan,
+    NavigationStep,
+)
+
 
 class SiteConfigError(ValueError):
     """Raised when the local sites YAML does not match the supported schema."""
@@ -26,6 +33,7 @@ _SITE_FIELDS = frozenset(
         "provider",
         "login_url",
         "target_url",
+        "navigation",
         "username",
         "password",
         "start_date",
@@ -51,7 +59,7 @@ class SiteConfig:
     id: str
     provider: str
     login_url: str
-    target_url: str
+    target_url: str | None
     username: str
     password: str
     start_date: date | None = None
@@ -64,6 +72,7 @@ class SiteConfig:
     timeout_seconds: int = 30
     max_retries: int = 2
     log_file: Path = Path("data/local/logs/site.log")
+    navigation: NavigationPlan | None = None
 
 
 @dataclass(frozen=True)
@@ -157,7 +166,7 @@ def _site(value: Any) -> SiteConfig:
     unknown = set(data) - _SITE_FIELDS
     if unknown:
         raise _error("site contains unknown fields")
-    required = ("id", "provider", "login_url", "target_url", "username", "password")
+    required = ("id", "provider", "login_url", "username", "password")
     for field in required:
         if field not in data:
             raise _error(f"site is missing required field {field}")
@@ -213,11 +222,17 @@ def _site(value: Any) -> SiteConfig:
     if not isinstance(configured_log, str):
         raise _error("log_file must be a relative path")
     log_file = _safe_log_path(configured_log, site_id)
+    target_url = _url(data, "target_url") if "target_url" in data else None
+    if target_url is not None and "navigation" in data:
+        raise _error("site cannot define both target_url and navigation")
+    navigation = _navigation(data.get("navigation")) if "navigation" in data else None
+    if target_url is None and navigation is None:
+        raise _error("site requires target_url or navigation")
     return SiteConfig(
         site_id,
         provider,
         _url(data, "login_url"),
-        _url(data, "target_url"),
+        target_url,
         username,
         password,
         start_date,
@@ -230,7 +245,101 @@ def _site(value: Any) -> SiteConfig:
         timeout,
         retries,
         log_file,
+        navigation,
     )
+
+
+def _navigation(value: Any) -> NavigationPlan:
+    """Convert one site's YAML navigation mapping into the runtime contract."""
+    try:
+        data = _mapping(value, "navigation")
+        if set(data) - {"version", "allowed_origin", "steps"}:
+            raise _error("navigation contains unknown fields")
+        version = _text(data, "version")
+        allowed_origin = _url(data, "allowed_origin")
+        assert version is not None
+        raw_steps = data.get("steps")
+        if not isinstance(raw_steps, list):
+            raise _error("navigation.steps must be a list")
+        steps: list[NavigationStep] = []
+        for raw in raw_steps:
+            item = _mapping(raw, "navigation step")
+            if set(item) - {
+                "order",
+                "method",
+                "url",
+                "params",
+                "form_data",
+                "timeout_seconds",
+                "expected_result",
+                "csrf_field",
+                "read_only",
+            }:
+                raise _error("navigation step contains unknown fields")
+            order = item.get("order")
+            if isinstance(order, bool) or not isinstance(order, int):
+                raise _error("navigation step order must be an integer")
+            method = _text(item, "method")
+            url = _url(item, "url")
+            assert method is not None
+            params = _string_mapping(item.get("params", {}), "navigation params")
+            form_data = _string_mapping(item.get("form_data", {}), "navigation form_data")
+            timeout = item.get("timeout_seconds", 30)
+            if isinstance(timeout, bool) or not isinstance(timeout, int):
+                raise _error("navigation timeout_seconds must be an integer")
+            expected_data = _mapping(item.get("expected_result"), "expected_result")
+            if set(expected_data) - {"status_code", "url_path", "text_marker"}:
+                raise _error("expected_result contains unknown fields")
+            status_code = expected_data.get("status_code")
+            if status_code is not None and (
+                isinstance(status_code, bool) or not isinstance(status_code, int)
+            ):
+                raise _error("expected_result.status_code must be an integer")
+            expected = ExpectedResult(
+                status_code=status_code,
+                url_path=_optional_text(expected_data, "url_path"),
+                text_marker=_optional_text(expected_data, "text_marker"),
+            )
+            read_only = item.get("read_only", False)
+            if not isinstance(read_only, bool):
+                raise _error("navigation step read_only must be a boolean")
+            steps.append(
+                NavigationStep(
+                    order,
+                    method,
+                    url,
+                    params,
+                    form_data,
+                    timeout,
+                    expected,
+                    _optional_text(item, "csrf_field"),
+                    read_only,
+                )
+            )
+        plan = NavigationPlan(version, tuple(steps), allowed_origin)
+        from adams_tutoria.declarative_navigation import NavigationPlanValidator
+
+        NavigationPlanValidator().validate(plan)
+        return plan
+    except NavigationError as exc:
+        raise _error("navigation does not match its schema") from exc
+
+
+def _optional_text(data: Mapping[str, Any], name: str) -> str | None:
+    value = data.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise _error(f"{name} must be a non-empty string")
+    return value.strip()
+
+
+def _string_mapping(value: Any, context: str) -> dict[str, str]:
+    if not isinstance(value, Mapping) or not all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    ):
+        raise _error(f"{context} must be a mapping of text values")
+    return dict(value)
 
 
 def load_sites_config(path: Path) -> SitesConfig:

@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime, time
 
 from adams_tutoria.config import SiteConfig
+from adams_tutoria.declarative_navigation import ExpectedResult, NavigationPlan, NavigationStep
 from adams_tutoria.monitoring import MonitorEventKind, MultiSiteMonitor
 
 
@@ -95,6 +96,84 @@ def test_login_reload_exit_and_site_isolation(monkeypatch) -> None:
     exit_events = monitor.tick(datetime(2026, 1, 5, 10, 0, tzinfo=UTC), monotonic=11)
     assert {event.site_id for event in exit_events} == {"one", "two"}
     assert first.closed and second.closed
+
+
+def test_multisite_monitor_emits_navigation_success_after_login_and_reload(
+    monkeypatch, tmp_path
+) -> None:
+    class Response:
+        status = 200
+
+    class Page:
+        url = "https://example.invalid/target"
+        body = "Synthetic monitoring target"
+
+        def __init__(self) -> None:
+            self.navigation_calls = 0
+
+        def locator(self, selector: str):
+            assert selector == "body"
+            return self
+
+        def inner_text(self) -> str:
+            return self.body
+
+        def goto(self, url: str, **kwargs: object) -> Response:
+            assert kwargs["method"] == "GET"
+            self.navigation_calls += 1
+            self.url = url
+            return Response()
+
+    class NavigationSession(Session):
+        def __init__(self) -> None:
+            super().__init__()
+            self.page = Page()
+
+    session = NavigationSession()
+    configured = SiteConfig(
+        "navigation-site",
+        "SYNTHETIC",
+        "https://example.invalid/login",
+        None,
+        "synthetic-user",
+        "synthetic-password",
+        start_time=time(9),
+        end_time=time(10),
+        weekdays=("MONDAY",),
+        interval_seconds=10,
+        timeout_seconds=7,
+        log_file=tmp_path / "navigation-site.log",
+        navigation=NavigationPlan(
+            "1.0",
+            (
+                NavigationStep(
+                    1,
+                    "GET",
+                    "https://example.invalid/target",
+                    expected=ExpectedResult(text_marker="Synthetic monitoring target"),
+                ),
+            ),
+            "https://example.invalid",
+        ),
+    )
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: Adapter(session))
+    monitor = MultiSiteMonitor([configured], browser_factory=lambda: object())
+    at_start = datetime(2026, 1, 5, 9, 0, tzinfo=UTC)
+
+    login_events = monitor.tick(at_start, monotonic=0)
+    reload_events = monitor.tick(at_start, monotonic=10)
+
+    assert [event.kind for event in login_events] == [MonitorEventKind.LOGIN]
+    assert [event.kind for event in reload_events] == [MonitorEventKind.RELOAD]
+    assert session.page.navigation_calls == 2
+    records = [json.loads(line) for line in configured.log_file.read_text().splitlines()]
+    assert [(record["action"], record["result"]) for record in records] == [
+        ("startup", "success"),
+        ("navigation", "success"),
+        ("login", "success"),
+        ("navigation", "success"),
+        ("reload", "success"),
+    ]
 
 
 def test_close_is_idempotent(monkeypatch) -> None:
@@ -197,7 +276,7 @@ def test_login_and_reload_are_written_to_independent_safe_logs(tmp_path, monkeyp
 
     for item in configured:
         records = [json.loads(line) for line in item.log_file.read_text().splitlines()]
-        assert [record["action"] for record in records] == ["login", "reload"]
+        assert [record["action"] for record in records] == ["startup", "login", "reload"]
         assert all(
             set(record) == {"timestamp", "site_id", "provider", "action", "result"}
             for record in records
@@ -242,11 +321,83 @@ def test_logs_exclude_tokens_headers_and_synthetic_personal_data(tmp_path) -> No
     )
 
     text = configured.log_file.read_text()
-    assert '"error":"operation failed"' in text
+    assert '"category":"logging"' in text or '"category":"authentication"' in text
     for value in sensitive_values:
         assert value not in text
     assert configured.password not in text
     assert configured.username not in text
+
+
+def test_failure_categories_are_safe_and_phase_specific(tmp_path) -> None:
+    configured = SiteConfig(
+        "categories",
+        "SYNTHETIC",
+        "https://example.invalid/login",
+        "https://example.invalid/target",
+        "synthetic-user",
+        "synthetic-password",
+        log_file=tmp_path / "categories.log",
+    )
+    from adams_tutoria.site_logging import SiteLogWriter
+
+    writer = SiteLogWriter(configured)
+    cases = (
+        ("startup", "config", "Startup no disponible."),
+        ("login", "authentication", "Login no confirmado."),
+        ("navigation", "navigation", "Navegación no confirmada."),
+        ("navigation", "timeout", "Operación agotó el tiempo."),
+        ("navigation", "blocked", "Intervención humana requerida."),
+        ("reload", "logging", "Registro local no disponible."),
+    )
+    for action, category, message in cases:
+        assert writer.write(action=action, result="error", category=category, message=message)
+
+    records = [json.loads(line) for line in configured.log_file.read_text().splitlines()]
+    assert [
+        (record["action"], record["category"], record["message"]) for record in records
+    ] == list(cases)
+    assert all(
+        set(record)
+        == {"timestamp", "site_id", "provider", "action", "result", "category", "message"}
+        for record in records
+    )
+
+
+def test_configured_log_path_and_early_failure_diagnostic_are_safe(tmp_path, monkeypatch) -> None:
+    configured_path = tmp_path / "configured" / "monitor.log"
+    configured = SiteConfig(
+        "early-failure",
+        "SYNTHETIC",
+        "https://example.invalid/login",
+        "https://example.invalid/target",
+        "synthetic-user",
+        "synthetic-secret",
+        start_time=time(9),
+        end_time=time(10),
+        weekdays=("MONDAY",),
+        log_file=configured_path,
+    )
+
+    class FailingAdapter:
+        def login_session(self, request: object, *, browser_api: object) -> tuple[object, None]:
+            del request, browser_api
+            raise RuntimeError("synthetic failure with secret synthetic-secret")
+
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: FailingAdapter())
+    monitor = MultiSiteMonitor([configured], browser_factory=lambda: object())
+
+    events = monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+
+    assert configured_path.exists()
+    records = [json.loads(line) for line in configured_path.read_text().splitlines()]
+    assert [record["action"] for record in records] == ["startup", "login"]
+    assert records[-1]["result"] == "error"
+    assert records[-1]["category"] == "authentication"
+    assert records[-1]["message"] == "Login no confirmado."
+    assert "synthetic-secret" not in configured_path.read_text()
+    login_failure = next(event for event in events if event.kind is MonitorEventKind.ERROR)
+    assert login_failure.phase == "login"
+    assert login_failure.category == "authentication"
 
 
 def test_log_write_failure_is_reported_without_stopping_other_sites(monkeypatch, tmp_path) -> None:
@@ -298,7 +449,7 @@ def test_log_write_failure_is_reported_without_stopping_other_sites(monkeypatch,
     assert ("two", MonitorEventKind.LOGIN) in {(event.site_id, event.kind) for event in events}
 
 
-def test_reload_log_failure_keeps_reload_failure_and_safe_logging_diagnostic(
+def test_reload_log_failure_keeps_runtime_and_emits_safe_logging_diagnostic(
     monkeypatch,
 ) -> None:
     session = Session()
@@ -306,16 +457,28 @@ def test_reload_log_failure_keeps_reload_failure_and_safe_logging_diagnostic(
     class ReloadLogFailure:
         calls = 0
 
-        def write(self, *, action: str, result: str, error: str | None = None) -> bool:
+        def write(
+            self,
+            *,
+            action: str,
+            result: str,
+            category: str | None = None,
+            message: str | None = None,
+        ) -> bool:
             self.calls += 1
             if self.calls == 1:
+                assert action == "startup"
+                assert result == "success"
+                assert category is None and message is None
+                return True
+            if self.calls == 2:
                 assert action == "login"
                 assert result == "success"
-                assert error is None
+                assert category is None and message is None
                 return True
             assert action == "reload"
             assert result == "success"
-            assert error is None
+            assert category is None and message is None
             raise OSError("synthetic private logging failure")
 
     monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: Adapter(session))
@@ -333,4 +496,5 @@ def test_reload_log_failure_keeps_reload_failure_and_safe_logging_diagnostic(
         (MonitorEventKind.RELOAD, ""),
         (MonitorEventKind.ERROR, "Registro local no disponible."),
     ]
-    assert session.closed
+    assert not session.closed
+    assert monitor.tick(at_start, monotonic=20)[0].kind is MonitorEventKind.RELOAD
