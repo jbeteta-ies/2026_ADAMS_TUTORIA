@@ -135,6 +135,21 @@ class MultiSiteMonitor:
                 if outcome.status.value == "success" and session is not None:
                     if runtime.site.navigation is not None:
                         diagnostics = NavigationExecutor(session).execute(runtime.site.navigation)
+                        for diagnostic in diagnostics:
+                            events.extend(
+                                self._logging_diagnostic(
+                                    runtime,
+                                    now,
+                                    action="navigation",
+                                    result=(
+                                        "success"
+                                        if diagnostic.status is NavigationStatus.SUCCESS
+                                        else "error"
+                                    ),
+                                    error=diagnostic.code,
+                                    response_metadata=diagnostic.response_metadata,
+                                )
+                            )
                         if (
                             not diagnostics
                             or diagnostics[-1].status is not NavigationStatus.SUCCESS
@@ -157,13 +172,9 @@ class MultiSiteMonitor:
                                     action="navigation",
                                     result="error",
                                     error="navigation phase failed",
+                                    response_metadata=None,
                                 ),
                             ]
-                        events.extend(
-                            self._logging_diagnostic(
-                                runtime, now, action="navigation", result="success", error=None
-                            )
-                        )
                     runtime.session = session
                     runtime.active = True
                     runtime.next_reload = monotonic + runtime.site.interval_seconds
@@ -207,15 +218,29 @@ class MultiSiteMonitor:
         assert runtime.session is not None
         for attempt in range(runtime.site.max_retries + 1):
             try:
+                navigation_metadata = None
                 if runtime.site.navigation is not None:
                     diagnostics = NavigationExecutor(runtime.session).execute(
                         runtime.site.navigation
                     )
+                    navigation_events = []
+                    for diagnostic in diagnostics:
+                        navigation_events.extend(
+                            self._logging_diagnostic(
+                                runtime,
+                                now,
+                                action="navigation",
+                                result=(
+                                    "success"
+                                    if diagnostic.status is NavigationStatus.SUCCESS
+                                    else "error"
+                                ),
+                                error=diagnostic.code,
+                                response_metadata=diagnostic.response_metadata,
+                            )
+                        )
                     if not diagnostics or diagnostics[-1].status is not NavigationStatus.SUCCESS:
                         raise RuntimeError("navigation failed")
-                    navigation_events = self._logging_diagnostic(
-                        runtime, now, action="navigation", result="success", error=None
-                    )
                 else:
                     navigation_events = []
                     assert runtime.site.target_url is not None
@@ -253,6 +278,7 @@ class MultiSiteMonitor:
                             action="reload",
                             result="error",
                             error="reload phase failed",
+                            response_metadata=navigation_metadata,
                         ),
                     ]
         raise AssertionError("unreachable")
@@ -266,10 +292,18 @@ class MultiSiteMonitor:
         action: str,
         result: str,
         error: str | None = None,
+        response_metadata: object | None = None,
     ) -> list[MonitorEvent]:
         return [
             event,
-            *self._logging_diagnostic(runtime, now, action=action, result=result, error=error),
+            *self._logging_diagnostic(
+                runtime,
+                now,
+                action=action,
+                result=result,
+                error=error,
+                response_metadata=response_metadata,
+            ),
         ]
 
     def _logged_event(
@@ -293,6 +327,7 @@ class MultiSiteMonitor:
         action: str,
         result: str,
         error: str | None,
+        response_metadata: object | None = None,
     ) -> list[MonitorEvent]:
         if runtime.site.id in self._logger_failures:
             if runtime.site.id in self._logger_diagnostics:
@@ -312,12 +347,21 @@ class MultiSiteMonitor:
         if writer is not None:
             try:
                 category, message = _safe_diagnostic(error, action, result)
-                if writer.write(
-                    action=action,
-                    result=result,
-                    category=category,
-                    message=message,
-                ):
+                arguments: dict[str, object] = {
+                    "action": action,
+                    "result": result,
+                    "category": category,
+                    "message": message,
+                }
+                if response_metadata is not None:
+                    arguments["response_metadata"] = response_metadata
+                try:
+                    written = writer.write(**arguments)  # type: ignore[arg-type]
+                except TypeError:
+                    # Preserve compatibility with injected legacy writers.
+                    arguments.pop("response_metadata", None)
+                    written = writer.write(**arguments)  # type: ignore[arg-type]
+                if written:
                     return []
             except Exception:
                 pass
@@ -377,7 +421,7 @@ def _safe_diagnostic(error: str | None, action: str, result: str) -> tuple[str |
     if action == "navigation":
         if error == "timeout":
             return "timeout", "Operación agotó el tiempo."
-        if error == "blocked":
+        if error in {"blocked", "human_intervention_required"}:
             return "blocked", "Intervención humana requerida."
         return "navigation", "Navegación no confirmada."
     if action == "reload":

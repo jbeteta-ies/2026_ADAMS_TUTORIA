@@ -172,6 +172,32 @@ def test_validator_rejects_missing_expected_result_signal() -> None:
         )
 
 
+def test_validator_rejects_boolean_or_non_integer_order_and_timeout() -> None:
+    with pytest.raises(NavigationError):
+        NavigationPlanValidator().validate(
+            plan(
+                NavigationStep(
+                    True,
+                    "GET",
+                    "https://synthetic.invalid/target",
+                    expected=ExpectedResult(status_code=200),
+                )
+            )  # type: ignore[arg-type]
+        )
+    with pytest.raises(NavigationError):
+        NavigationPlanValidator().validate(
+            plan(
+                NavigationStep(
+                    1,
+                    "GET",
+                    "https://synthetic.invalid/target",
+                    timeout_seconds=True,
+                    expected=ExpectedResult(status_code=200),
+                )
+            )  # type: ignore[arg-type]
+        )
+
+
 def test_validator_rejects_post_without_explicit_read_only_authorization() -> None:
     with pytest.raises(NavigationError, match="read_only"):
         NavigationPlanValidator().validate(
@@ -259,3 +285,134 @@ def test_real_timeout_is_reported() -> None:
         )
     )
     assert result[0].code == "timeout"
+
+
+def test_response_metadata_contract_covers_failure_shapes_without_exception_text() -> None:
+    class UnexpectedResponse:
+        status = 503
+        url = "https://synthetic.invalid/target"
+
+    class UnexpectedPage(Page):
+        def goto(self, url: str, **kwargs: object) -> UnexpectedResponse:
+            self.calls.append({"url": url, **kwargs})
+            self.url = url
+            return UnexpectedResponse()
+
+    session = Session()
+    session.page = UnexpectedPage()
+    unexpected = NavigationExecutor(session).execute(
+        plan(
+            NavigationStep(
+                1,
+                "GET",
+                "https://synthetic.invalid/target",
+                expected=ExpectedResult(status_code=200),
+            )
+        )
+    )[0]
+    assert unexpected.response_metadata is not None
+    assert unexpected.response_metadata["status_code"] == 503
+    assert unexpected.response_metadata["expected_result_match"] == "no"
+    assert unexpected.response_metadata["result"] == "failed"
+
+    class NoResponsePage(Page):
+        def goto(self, url: str, **kwargs: object) -> None:
+            return None
+
+    session.page = NoResponsePage()
+    no_response = NavigationExecutor(session).execute(
+        plan(
+            NavigationStep(
+                1,
+                "GET",
+                "https://synthetic.invalid/target",
+                expected=ExpectedResult(status_code=200),
+            )
+        )
+    )[0]
+    assert no_response.code == "no_response"
+    assert no_response.response_metadata["status_code"] is None  # type: ignore[index]
+    assert no_response.response_metadata["expected_result_match"] == "not_checkable"  # type: ignore[index]
+
+    class ExplodingPage(Page):
+        def goto(self, url: str, **kwargs: object) -> Response:
+            raise RuntimeError("secret token, cookie, https://private.invalid/?pii=1")
+
+    session.page = ExplodingPage()
+    generic = NavigationExecutor(session).execute(
+        plan(
+            NavigationStep(
+                1,
+                "GET",
+                "https://synthetic.invalid/target",
+                expected=ExpectedResult(status_code=200),
+            )
+        )
+    )[0]
+    assert generic.code == "navigation_error"
+    assert generic.response_metadata["result"] == "failed"  # type: ignore[index]
+    assert "secret token" not in repr(generic)
+
+
+def test_response_metadata_marks_internal_and_external_redirects() -> None:
+    class RedirectResponse:
+        status = 200
+
+        def __init__(self, url: str) -> None:
+            self.url = url
+
+    session = Session()
+    session.page.goto = lambda url, **kwargs: RedirectResponse(  # type: ignore[assignment]
+        "https://synthetic.invalid/other"
+    )
+    internal = NavigationExecutor(session).execute(
+        plan(
+            NavigationStep(
+                1,
+                "GET",
+                "https://synthetic.invalid/target",
+                expected=ExpectedResult(url_path="/other"),
+            )
+        )
+    )[0]
+    assert internal.response_metadata["redirected"] is True  # type: ignore[index]
+    assert internal.code == "expected_result_not_confirmed"
+
+    session.page.goto = lambda url, **kwargs: RedirectResponse(  # type: ignore[assignment]
+        "https://external.invalid/landing"
+    )
+    external = NavigationExecutor(session).execute(
+        plan(
+            NavigationStep(
+                1,
+                "GET",
+                "https://synthetic.invalid/target",
+                expected=ExpectedResult(status_code=200),
+            )
+        )
+    )[0]
+    assert external.code == "external_redirect"
+    assert external.response_metadata["redirected"] is True  # type: ignore[index]
+
+
+def test_redirect_detection_includes_query_without_persisting_url() -> None:
+    class QueryResponse:
+        status = 200
+        url = "https://synthetic.invalid/target?changed=1"
+
+    session = Session()
+    session.page.goto = lambda url, **kwargs: QueryResponse()  # type: ignore[assignment]
+    diagnostic = NavigationExecutor(session).execute(
+        plan(
+            NavigationStep(
+                1,
+                "GET",
+                "https://synthetic.invalid/target?secret=synthetic",
+                expected=ExpectedResult(status_code=200),
+            )
+        )
+    )[0]
+    assert diagnostic.response_metadata is not None
+    assert diagnostic.response_metadata["redirected"] is True
+    assert diagnostic.response_metadata["step"] == "step-1"
+    assert "synthetic.invalid" not in repr(diagnostic.response_metadata)
