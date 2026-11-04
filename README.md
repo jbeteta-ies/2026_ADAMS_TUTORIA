@@ -102,8 +102,22 @@ IANA timezone; `interval_seconds` defaults to 300 and must be positive; and
 `log_file` defaults to a relative `data/local/logs/<id>.log` path. URLs must be
 HTTP(S) URLs without embedded credentials. Unknown fields, unsafe log paths,
 duplicate IDs, invalid dates/times, and invalid timezones are rejected without
-including password values in errors. This issue defines the contract only; it
-does not perform login, monitoring, reloading, scheduling, or logging.
+including password values in errors.
+
+After copying `config.yaml.example` to the ignored local `config.yaml`, run the
+continuous monitor with:
+
+```bash
+uv run adams-monitor
+```
+
+The command validates configuration before starting Playwright and coordinates
+the scheduler, monitor, provider adapters, and independent site logs. SIGINT,
+SIGTERM, and Ctrl-C request a cooperative clean shutdown. Exit status 2 means
+configuration could not be loaded or validated, 1 means an execution failure,
+and 0 means a clean stop. Sessions and browser resources are closed
+best-effort and idempotently; site-level failures remain isolated by
+`MultiSiteMonitor`.
 
 The standard-library configuration layer is available through
 `adams_tutoria.config`:

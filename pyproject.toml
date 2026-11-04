@@ -17,6 +17,7 @@ build-backend = "uv_build"
 [project.scripts]
 adams-tutoria = "adams_tutoria.__main__:main"
 adams-login = "adams_tutoria.adams_login_cli:main"
+adams-monitor = "adams_tutoria.continuous_monitoring:main"
 
 [dependency-groups]
 dev = [
