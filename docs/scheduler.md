@@ -16,3 +16,19 @@ sitio, salvo ese tramo posterior a medianoche, que conserva el día de inicio.
 `run_forever()` mantiene el ciclo continuo. Recibe `clock`, `wait`,
 `on_events` y `should_stop` como dependencias opcionales inyectables, por lo
 que las pruebas no dependen del reloj real ni esperan en tiempo real.
+
+## Monitorización multi-sitio
+
+`adams_tutoria.monitoring.MultiSiteMonitor` conecta esos eventos con el
+adaptador indicado por `provider`. Cada sitio obtiene un contexto de navegador
+efímero propio, inicia sesión al entrar en su ventana y recarga únicamente su
+`target_url` en el intervalo configurado. `timeout_seconds` limita cada
+ navegación. `max_retries` es el número de reintentos posteriores al primero:
+ `0` hace un intento y `2` permite hasta tres intentos totales, tanto para
+ login como para cada recarga. Un error, bloqueo o timeout solo desactiva el
+ sitio afectado.
+
+Al producirse `EXIT`, o al llamar a `close()`, se cierran el contexto y el
+navegador del sitio. El motor no ejecuta acciones de contenido, no persiste
+sesiones, cookies, tokens ni HTML, y sus eventos contienen solo el identificador
+del sitio y estados operativos seguros.

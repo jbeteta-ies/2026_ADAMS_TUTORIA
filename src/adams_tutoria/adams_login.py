@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -18,6 +19,7 @@ class AdamsLoginSettings:
     login_url: str
     target_url: str = ""
     interval_seconds: int = 300
+    timeout_seconds: int = 30
 
     @classmethod
     def from_environment(cls, environ: Mapping[str, str] | None = None) -> AdamsLoginSettings:
@@ -35,14 +37,93 @@ class LoginResult:
     message: str
 
 
+class LoginSession:
+    """An in-memory browser session owned by one monitored site."""
+
+    def __init__(self, browser: Any, context: Any, page: Any) -> None:
+        self._browser = browser
+        self._context = context
+        self.page = page
+        self._closed = False
+
+    def reload(self, url: str, *, timeout_seconds: int) -> None:
+        if self._closed:
+            raise RuntimeError("login session is closed")
+        _goto(self.page, url, timeout_seconds)
+
+    def close(self) -> None:
+        if not self._closed:
+            self._closed = True
+            self._context.close()
+            self._browser.close()
+
+
+def perform_login_session(
+    settings: AdamsLoginSettings, *, browser_api: Any
+) -> tuple[LoginResult, LoginSession | None]:
+    """Attempt login and return an ephemeral session for the caller to close."""
+    _validate_url(settings.login_url)
+    browser: Any | None = None
+    context: Any | None = None
+    try:
+        browser = browser_api.chromium.launch()
+        context = browser.new_context()
+        page = context.new_page()
+        session = LoginSession(browser, context, page)
+        _goto(page, settings.login_url, settings.timeout_seconds)
+        username = _first_visible(
+            page,
+            (
+                "input[name='nombre']",
+                "input[name='username']",
+                "input[name*='user']",
+                "input[type='email']",
+            ),
+        )
+        password = _first_visible(
+            page, ("input[name='clave']", "input[name='password']", "input[type='password']")
+        )
+        submit = _first_visible(
+            page,
+            (
+                "button[name='Submit']",
+                "input[name='Submit']",
+                "form button[type='submit']",
+                "form input[type='submit']",
+                "button[type='submit']",
+                "input[type='submit']",
+            ),
+        )
+        if username is None or password is None or submit is None:
+            session.close()
+            return LoginResult("failed", "No se detectó un formulario de login compatible."), None
+        username.fill(settings.username)
+        password.fill(settings.password)
+        submit.click()
+        if _is_blocked(page):
+            session.close()
+            return LoginResult(
+                "blocked", "El login requiere CAPTCHA o MFA; se detiene sin intentar evitarlo."
+            ), None
+        if page.url != settings.login_url or _has_success_marker(page):
+            return LoginResult("success", "Login completado correctamente."), session
+        session.close()
+        return LoginResult("failed", "El login no pudo confirmarse."), None
+    except Exception:
+        _close_resources(context, browser)
+        raise
+
+
 def perform_login(settings: AdamsLoginSettings, *, browser_api: Any) -> LoginResult:
     """Submit one login attempt using an injected Playwright-like API."""
     _validate_url(settings.login_url)
-    browser = browser_api.chromium.launch()
-    context = browser.new_context()
-    page = context.new_page()
+    browser: Any | None = None
+    context: Any | None = None
     try:
-        page.goto(settings.login_url)
+        browser = browser_api.chromium.launch()
+        context = browser.new_context()
+        page = context.new_page()
+        _goto(page, settings.login_url, settings.timeout_seconds)
         username = _first_visible(
             page,
             (
@@ -79,8 +160,7 @@ def perform_login(settings: AdamsLoginSettings, *, browser_api: Any) -> LoginRes
             return LoginResult("success", "Login completado correctamente.")
         return LoginResult("failed", "El login no pudo confirmarse.")
     finally:
-        context.close()
-        browser.close()
+        _close_resources(context, browser)
 
 
 def login_with_playwright(settings: AdamsLoginSettings) -> LoginResult:
@@ -102,6 +182,24 @@ def _validate_url(url: str) -> None:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("ADAMS_LOGIN_URL debe ser una URL HTTP(S) válida.")
+
+
+def _goto(page: Any, url: str, timeout_seconds: int) -> None:
+    """Use Playwright's timeout while keeping small synthetic fakes compatible."""
+    try:
+        page.goto(url, timeout=timeout_seconds * 1000)
+    except TypeError:
+        page.goto(url)
+
+
+def _close_resources(context: Any | None, browser: Any | None) -> None:
+    """Close partially acquired resources without masking the original error."""
+    if context is not None:
+        with suppress(Exception):
+            context.close()
+    if browser is not None:
+        with suppress(Exception):
+            browser.close()
 
 
 def _first_visible(page: Any, selectors: tuple[str, ...]) -> Any | None:

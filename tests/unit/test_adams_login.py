@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from adams_tutoria.adams_login import AdamsLoginSettings, perform_login
+from adams_tutoria.adams_login import AdamsLoginSettings, perform_login, perform_login_session
 
 
 class Locator:
@@ -31,8 +31,10 @@ class Page:
         self.body = body
         self.url = "https://example.invalid/login"
         self.locators: dict[str, Locator] = {}
+        self.goto_calls: list[tuple[str, int | None]] = []
 
-    def goto(self, url: str) -> None:
+    def goto(self, url: str, *, timeout: int | None = None) -> None:
+        self.goto_calls.append((url, timeout))
         self.url = url
 
     def locator(self, selector: str) -> Locator:
@@ -77,6 +79,26 @@ class BrowserApi:
         self.chromium = Chromium(self.browser)
 
 
+@pytest.mark.parametrize("failure", ["launch", "context", "page"])
+def test_partial_launch_failures_close_acquired_resources(failure: str) -> None:
+    page, api = prepare_page("Logout")
+    browser = api.browser
+    context = browser.context
+
+    if failure == "launch":
+        api.chromium.launch = lambda: (_ for _ in ()).throw(RuntimeError("launch failed"))
+    elif failure == "context":
+        browser.new_context = lambda: (_ for _ in ()).throw(RuntimeError("context failed"))
+    else:
+        context.new_page = lambda: (_ for _ in ()).throw(RuntimeError("page failed"))
+
+    with pytest.raises(RuntimeError):
+        perform_login_session(configured(), browser_api=api)
+
+    assert (failure == "launch") or browser.closed
+    assert (failure in {"launch", "context"}) or context.closed
+
+
 def configured() -> AdamsLoginSettings:
     return AdamsLoginSettings(
         "synthetic-user", "synthetic-password", "https://example.invalid/login"
@@ -110,10 +132,36 @@ def test_env_file_loads_all_documented_values(tmp_path: Path) -> None:
 
 def test_success_closes_context_and_does_not_store_session() -> None:
     page, api = prepare_page("Logout")
-    result = perform_login(configured(), browser_api=api)
+    settings = AdamsLoginSettings(
+        "synthetic-user",
+        "synthetic-password",
+        "https://example.invalid/login",
+        interval_seconds=300,
+        timeout_seconds=30,
+    )
+    result = perform_login(settings, browser_api=api)
     assert result.status == "success"
     assert api.browser.context.closed and api.browser.closed
     assert page.locators["input[name='clave']"].value == "synthetic-password"
+    assert page.goto_calls == [("https://example.invalid/login", 30_000)]
+
+
+def test_login_session_uses_timeout_not_reload_interval() -> None:
+    page, api = prepare_page("Logout")
+    settings = AdamsLoginSettings(
+        "synthetic-user",
+        "synthetic-password",
+        "https://example.invalid/login",
+        interval_seconds=300,
+        timeout_seconds=30,
+    )
+
+    result, session = perform_login_session(settings, browser_api=api)
+
+    assert result.status == "success"
+    assert session is not None
+    assert page.goto_calls == [("https://example.invalid/login", 30_000)]
+    session.close()
 
 
 def test_real_login_fields_are_detected_when_submit_is_outside_form() -> None:
