@@ -18,3 +18,57 @@ sites:
     timeout_seconds: 30
     max_retries: 2
     log_file: data/local/logs/demo-site.log
+    # -------------------------------------------------------------------------
+    # Navegación declarativa sintética posterior al login de este sitio.
+    # -------------------------------------------------------------------------
+    # `login_url` y los campos de login anteriores pertenecen al sitio. Esta
+    # navegación empieza solo después de que el login existente haya entregado
+    # una sesión autenticada al ejecutor; no describe ni repite el login.
+    # El cargador valida esta sección y construye un NavigationPlan en memoria.
+    #
+    # No sustituir placeholders por credenciales, cookies, tokens, PII ni
+    # valores operativos. Ver docs/declarative-navigation.md.
+    # navigation:
+    #   version: "1.0"
+    #   allowed_origin: https://example.invalid  # allowlist; origen sintético
+    #   steps:
+    #     - order: 1
+    #       method: GET
+    #       url: https://example.invalid/course-selection
+    #       params:
+    #         modoCarga: synthetic-mode  # placeholder; confirmar localmente
+    #         ssl: synthetic-ssl          # placeholder; nunca operativo
+    #       form_data: {}
+    #       timeout_seconds: 30
+    #       expected_result:
+    #         status_code: 200
+    #         url_path: /course-selection
+    #         # text_marker: Synthetic course selection  # opcional y sintético
+    #       # csrf_field: csrf_placeholder  # nombre, no valor del token
+    #
+    #     - order: 2
+    #       method: POST
+    #       url: https://example.invalid/course-selection
+    #       params: {}
+    #       form_data:
+    #         aula: synthetic-classroom  # placeholder sintético de aula/curso
+    #         modoCarga: synthetic-mode   # placeholder sintético
+    #         ssl: synthetic-ssl          # placeholder sintético
+    #       csrf_field: csrf_placeholder  # el ejecutor lee su valor en memoria
+    #       read_only: true  # autorización explícita; no garantiza semántica del servidor
+    #       timeout_seconds: 30
+    #       expected_result:
+    #         status_code: 200
+    #         url_path: /course-selection
+    #
+    #     - order: 3
+    #       method: GET
+    #       url: https://example.invalid/monitor-target
+    #       params:
+    #         aula: synthetic-classroom  # placeholder; no identificador real
+    #       form_data: {}
+    #       timeout_seconds: 30
+    #       expected_result:
+    #         status_code: 200
+    #         url_path: /monitor-target
+    #         # text_marker: Synthetic monitoring target  # opcional y sintético

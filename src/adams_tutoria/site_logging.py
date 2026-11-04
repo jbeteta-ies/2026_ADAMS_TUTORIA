@@ -15,7 +15,20 @@ from adams_tutoria.config import SiteConfig
 _MAX_BYTES: Final = 1_048_576
 _BACKUP_COUNT: Final = 3
 _RETENTION_DAYS: Final = 30
-_ACTIONS: Final = frozenset({"login", "reload"})
+_ACTIONS: Final = frozenset({"startup", "login", "navigation", "reload"})
+_CATEGORIES: Final = frozenset(
+    {"config", "authentication", "navigation", "timeout", "blocked", "logging"}
+)
+_MESSAGES: Final = frozenset(
+    {
+        "Startup no disponible.",
+        "Login no confirmado.",
+        "Navegación no confirmada.",
+        "Operación agotó el tiempo.",
+        "Intervención humana requerida.",
+        "Registro local no disponible.",
+    }
+)
 
 
 def _safe_label(value: str) -> str:
@@ -51,10 +64,24 @@ class SiteLogWriter:
     def path(self) -> Path:
         return self._path
 
-    def write(self, *, action: str, result: str, error: str | None = None) -> bool:
+    def write(
+        self,
+        *,
+        action: str,
+        result: str,
+        category: str | None = None,
+        message: str | None = None,
+        error: str | None = None,
+    ) -> bool:
         """Persist one safe event, returning ``False`` if local logging failed."""
         if action not in _ACTIONS or result not in {"success", "error"}:
-            raise ValueError("unsupported site log event")
+            return False
+        if result == "error" and category is None:
+            category = "logging"
+        if result == "error" and message is None:
+            message = "Registro local no disponible."
+        if result == "error" and (category not in _CATEGORIES or message not in _MESSAGES):
+            return False
         record = {
             "timestamp": datetime.now(UTC).isoformat(),
             "site_id": _safe_label(self._site.id),
@@ -62,8 +89,10 @@ class SiteLogWriter:
             "action": action,
             "result": result,
         }
-        if error is not None:
-            record["error"] = "operation failed" if error else "operation failed"
+        if result == "error":
+            assert category is not None and message is not None
+            record["category"] = category
+            record["message"] = message
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             handler = RotatingFileHandler(
@@ -77,7 +106,8 @@ class SiteLogWriter:
             finally:
                 handler.close()
             self._prune_old_files()
-        except (OSError, ValueError):
+        except Exception:
+            # Logging is diagnostic only and must never escape into monitoring.
             return False
         return True
 

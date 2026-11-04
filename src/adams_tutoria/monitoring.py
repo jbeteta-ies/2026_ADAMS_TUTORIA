@@ -11,6 +11,7 @@ from time import sleep
 from typing import Any
 
 from adams_tutoria.config import SiteConfig
+from adams_tutoria.declarative_navigation import NavigationExecutor, NavigationStatus
 from adams_tutoria.login_adapters import LoginAdapter, adapter_for_site, request_from_site
 from adams_tutoria.scheduler import ScheduleEventKind, SiteScheduler
 from adams_tutoria.site_logging import SiteLogWriter
@@ -29,6 +30,8 @@ class MonitorEvent:
     kind: MonitorEventKind
     at: datetime
     message: str = ""
+    phase: str | None = None
+    category: str | None = None
 
 
 @dataclass
@@ -55,11 +58,14 @@ class MultiSiteMonitor:
         self._scheduler = SiteScheduler(configured_sites)
         self._runtimes: dict[str, _Runtime] = {}
         self._loggers: dict[str, SiteLogWriter | None] = {}
+        self._logger_failures: set[str] = set()
+        self._logger_diagnostics: set[str] = set()
         for site in configured_sites:
             try:
                 self._loggers[site.id] = log_writer_factory(site)
             except Exception:
                 self._loggers[site.id] = None
+                self._logger_failures.add(site.id)
             try:
                 adapter = adapter_for_site(site)
             except Exception:
@@ -97,15 +103,28 @@ class MultiSiteMonitor:
         return tuple(events)
 
     def _enter(self, runtime: _Runtime, now: datetime, monotonic: float) -> list[MonitorEvent]:
+        events = self._logging_diagnostic(
+            runtime, now, action="startup", result="success", error=None
+        )
         if runtime.adapter is None:
             runtime.active = False
             return [
-                MonitorEvent(
-                    runtime.site.id,
-                    MonitorEventKind.ERROR,
+                *events,
+                *self._logged_events(
+                    runtime,
                     now,
-                    runtime.setup_error or "Sitio aislado.",
-                )
+                    MonitorEvent(
+                        runtime.site.id,
+                        MonitorEventKind.ERROR,
+                        now,
+                        "Sitio aislado.",
+                        "startup",
+                        "config",
+                    ),
+                    action="startup",
+                    result="error",
+                    error="config",
+                ),
             ]
         # max_retries counts attempts after the first one.
         for attempt in range(runtime.site.max_retries + 1):
@@ -114,16 +133,50 @@ class MultiSiteMonitor:
                     request_from_site(runtime.site), browser_api=self._browser_factory()
                 )
                 if outcome.status.value == "success" and session is not None:
+                    if runtime.site.navigation is not None:
+                        diagnostics = NavigationExecutor(session).execute(runtime.site.navigation)
+                        if (
+                            not diagnostics
+                            or diagnostics[-1].status is not NavigationStatus.SUCCESS
+                        ):
+                            with suppress(Exception):
+                                session.close()
+                            return [
+                                *events,
+                                *self._logged_events(
+                                    runtime,
+                                    now,
+                                    MonitorEvent(
+                                        runtime.site.id,
+                                        MonitorEventKind.ERROR,
+                                        now,
+                                        "Navegación post-login no confirmada; sitio aislado.",
+                                        "navigation",
+                                        "navigation",
+                                    ),
+                                    action="navigation",
+                                    result="error",
+                                    error="navigation phase failed",
+                                ),
+                            ]
+                        events.extend(
+                            self._logging_diagnostic(
+                                runtime, now, action="navigation", result="success", error=None
+                            )
+                        )
                     runtime.session = session
                     runtime.active = True
                     runtime.next_reload = monotonic + runtime.site.interval_seconds
-                    return self._logged_events(
-                        runtime,
-                        now,
-                        MonitorEvent(runtime.site.id, MonitorEventKind.LOGIN, now),
-                        action="login",
-                        result="success",
-                    )
+                    return [
+                        *events,
+                        *self._logged_events(
+                            runtime,
+                            now,
+                            MonitorEvent(runtime.site.id, MonitorEventKind.LOGIN, now),
+                            action="login",
+                            result="success",
+                        ),
+                    ]
                 if outcome.status.value == "blocked":
                     break
             except Exception:
@@ -131,35 +184,55 @@ class MultiSiteMonitor:
             if attempt == runtime.site.max_retries:
                 break
         runtime.active = False
-        return self._logged_events(
-            runtime,
-            now,
-            MonitorEvent(
-                runtime.site.id,
-                MonitorEventKind.ERROR,
+        return [
+            *events,
+            *self._logged_events(
+                runtime,
                 now,
-                "Login no confirmado; sitio aislado.",
+                MonitorEvent(
+                    runtime.site.id,
+                    MonitorEventKind.ERROR,
+                    now,
+                    "Login no confirmado; sitio aislado.",
+                    "login",
+                    "authentication",
+                ),
+                action="login",
+                result="error",
+                error="login phase failed",
             ),
-            action="login",
-            result="error",
-            error="operation failed",
-        )
+        ]
 
     def _reload(self, runtime: _Runtime, now: datetime, monotonic: float) -> list[MonitorEvent]:
         assert runtime.session is not None
         for attempt in range(runtime.site.max_retries + 1):
             try:
-                runtime.session.reload(
-                    runtime.site.target_url, timeout_seconds=runtime.site.timeout_seconds
-                )
+                if runtime.site.navigation is not None:
+                    diagnostics = NavigationExecutor(runtime.session).execute(
+                        runtime.site.navigation
+                    )
+                    if not diagnostics or diagnostics[-1].status is not NavigationStatus.SUCCESS:
+                        raise RuntimeError("navigation failed")
+                    navigation_events = self._logging_diagnostic(
+                        runtime, now, action="navigation", result="success", error=None
+                    )
+                else:
+                    navigation_events = []
+                    assert runtime.site.target_url is not None
+                    runtime.session.reload(
+                        runtime.site.target_url, timeout_seconds=runtime.site.timeout_seconds
+                    )
                 runtime.next_reload = monotonic + runtime.site.interval_seconds
-                return self._logged_events(
-                    runtime,
-                    now,
-                    MonitorEvent(runtime.site.id, MonitorEventKind.RELOAD, now),
-                    action="reload",
-                    result="success",
-                )
+                return [
+                    *navigation_events,
+                    *self._logged_events(
+                        runtime,
+                        now,
+                        MonitorEvent(runtime.site.id, MonitorEventKind.RELOAD, now),
+                        action="reload",
+                        result="success",
+                    ),
+                ]
             except Exception:
                 if attempt == runtime.site.max_retries:
                     self._close(runtime)
@@ -169,6 +242,8 @@ class MultiSiteMonitor:
                         MonitorEventKind.ERROR,
                         now,
                         "Recarga no completada; sitio aislado.",
+                        "reload",
+                        "navigation",
                     )
                     return [
                         event,
@@ -177,7 +252,7 @@ class MultiSiteMonitor:
                             now,
                             action="reload",
                             result="error",
-                            error="operation failed",
+                            error="reload phase failed",
                         ),
                     ]
         raise AssertionError("unreachable")
@@ -219,18 +294,46 @@ class MultiSiteMonitor:
         result: str,
         error: str | None,
     ) -> list[MonitorEvent]:
+        if runtime.site.id in self._logger_failures:
+            if runtime.site.id in self._logger_diagnostics:
+                return []
+            self._logger_diagnostics.add(runtime.site.id)
+            return [
+                MonitorEvent(
+                    runtime.site.id,
+                    MonitorEventKind.ERROR,
+                    now,
+                    "Registro local no disponible.",
+                    "logging",
+                    "logging",
+                )
+            ]
         writer = self._loggers.get(runtime.site.id)
         if writer is not None:
             try:
-                if writer.write(action=action, result=result, error=error):
+                category, message = _safe_diagnostic(error, action, result)
+                if writer.write(
+                    action=action,
+                    result=result,
+                    category=category,
+                    message=message,
+                ):
                     return []
             except Exception:
                 pass
-        runtime.active = False
-        self._close(runtime)
+        # A local log is diagnostic only.  Isolate a broken writer once so a
+        # logging failure cannot stop or repeatedly retry the site runtime.
+        self._loggers[runtime.site.id] = None
+        self._logger_failures.add(runtime.site.id)
+        self._logger_diagnostics.add(runtime.site.id)
         return [
             MonitorEvent(
-                runtime.site.id, MonitorEventKind.ERROR, now, "Registro local no disponible."
+                runtime.site.id,
+                MonitorEventKind.ERROR,
+                now,
+                "Registro local no disponible.",
+                "logging",
+                "logging",
             )
         ]
 
@@ -262,3 +365,23 @@ class MultiSiteMonitor:
 
 
 __all__ = ["MonitorEvent", "MonitorEventKind", "MultiSiteMonitor"]
+
+
+def _safe_diagnostic(error: str | None, action: str, result: str) -> tuple[str | None, str | None]:
+    if result == "success":
+        return None, None
+    if action == "startup":
+        return "config", "Startup no disponible."
+    if action == "login":
+        return "authentication", "Login no confirmado."
+    if action == "navigation":
+        if error == "timeout":
+            return "timeout", "Operación agotó el tiempo."
+        if error == "blocked":
+            return "blocked", "Intervención humana requerida."
+        return "navigation", "Navegación no confirmada."
+    if action == "reload":
+        if error == "timeout":
+            return "timeout", "Operación agotó el tiempo."
+        return "navigation", "Navegación no confirmada."
+    return "logging", "Registro local no disponible."

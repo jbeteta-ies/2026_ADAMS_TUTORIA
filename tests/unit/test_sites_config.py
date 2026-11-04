@@ -41,6 +41,67 @@ sites:
     assert config.sites[0].timezone == "UTC"
 
 
+def test_loads_nested_navigation_plan_from_yaml(tmp_path: Path) -> None:
+    config = load_sites_config(
+        _write(
+            tmp_path,
+            """
+schema_version: 1
+sites:
+  - id: synthetic-navigation
+    provider: ADAMS
+    login_url: https://example.invalid/login
+    username: synthetic-user
+    password: synthetic-password
+    navigation:
+      version: "1.0"
+      allowed_origin: https://example.invalid
+      steps:
+        - order: 1
+          method: GET
+          url: https://example.invalid/rooms
+          params: {mode: synthetic}
+          form_data: {}
+          timeout_seconds: 10
+          expected_result: {status_code: 200, url_path: /rooms}
+        - order: 2
+          method: POST
+          url: https://example.invalid/rooms
+          params: {}
+          form_data: {room: synthetic-room}
+          read_only: true
+          timeout_seconds: 10
+          expected_result: {status_code: 200, url_path: /target}
+""",
+        )
+    )
+    site = config.sites[0]
+    assert site.target_url is None
+    assert site.navigation is not None
+    assert site.navigation.steps[-1].url.endswith("/rooms")
+    assert site.navigation.steps[1].form_data["room"] == "synthetic-room"
+
+
+def test_rejects_ambiguous_target_and_navigation(tmp_path: Path) -> None:
+    with pytest.raises(SiteConfigError, match="both"):
+        load_sites_config(
+            _write(
+                tmp_path,
+                """
+schema_version: 1
+sites:
+  - id: ambiguous
+    provider: ADAMS
+    login_url: https://example.invalid/login
+    target_url: https://example.invalid/target
+    username: synthetic-user
+    password: synthetic-password
+    navigation: {version: "1.0", allowed_origin: https://example.invalid, steps: []}
+""",
+            )
+        )
+
+
 @pytest.mark.parametrize(
     "fragment",
     [
