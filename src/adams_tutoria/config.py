@@ -197,8 +197,8 @@ def _site(value: Any) -> SiteConfig:
         raise _error("timezone must be a valid IANA timezone") from exc
     start_time = _time(data, "start_time", time.min)
     end_time = _time(data, "end_time", time(23, 59, 59))
-    if start_time >= end_time:
-        raise _error("end_time must be after start_time")
+    if start_time == end_time:
+        raise _error("start_time and end_time must differ")
     configured_log = data.get("log_file", f"data/local/logs/{site_id}.log")
     if not isinstance(configured_log, str):
         raise _error("log_file must be a relative path")
