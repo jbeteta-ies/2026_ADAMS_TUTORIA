@@ -89,7 +89,7 @@ uv run mypy src
 
 ### Local sites YAML
 
-`config.yaml.example` documents the ignored local `config.yaml` contract. Copy
+`config.example.yaml` documents the generic, ignored local `config.yaml` contract. Copy
 the example locally and replace only its placeholders; no credentials or
 cookies belong in tracked files. `adams_tutoria.config.load_sites_config(path)`
 uses `yaml.safe_load` and returns frozen typed records. The schema requires
@@ -104,7 +104,7 @@ HTTP(S) URLs without embedded credentials. Unknown fields, unsafe log paths,
 duplicate IDs, invalid dates/times, and invalid timezones are rejected without
 including password values in errors.
 
-After copying `config.yaml.example` to the ignored local `config.yaml`, run the
+After copying `config.example.yaml` to the ignored local `config.yaml`, run the
 continuous monitor with:
 
 ```bash
@@ -125,6 +125,9 @@ de configuración `2` antes de iniciar la monitorización.
 secretos; un fallo de ejecución devuelve `1`; una terminación normal o por
 `SIGINT`/`SIGTERM` devuelve `0`. El worker espera antes de la ventana, respeta
 ventanas nocturnas y no inicia una segunda ventana.
+
+El despliegue del worker ADAMS en GitHub Actions, sus Secrets y su operación
+están documentados en [docs/deployment-adams.md](docs/deployment-adams.md).
 
 The command validates configuration before starting Playwright and coordinates
 the scheduler, monitor, provider adapters, and independent site logs. SIGINT,

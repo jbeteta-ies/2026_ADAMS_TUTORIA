@@ -1,0 +1,40 @@
+# Production-shaped ADAMS configuration for GitHub Actions.
+# The workflow replaces only username and password at runtime. Never commit
+# the generated config.yaml; it is ignored and must not be uploaded as an artifact.
+schema_version: 1
+sites:
+  - id: adams-site
+    provider: ADAMS
+    login_url: https://www.formacion.cc/index.php?c=adamsvalencia
+    username: "${ADAMS_USERNAME}"
+    password: "${ADAMS_PASSWORD}"
+    weekdays: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY]
+    start_time: "16:20"
+    end_time: "20:40"
+    timezone: Europe/Madrid
+    interval_seconds: 60
+    timeout_seconds: 30
+    max_retries: 2
+    log_file: data/local/logs/adams-site.log
+    navigation:
+      version: "1.0"
+      allowed_origin: https://www.formacion.cc/
+      steps:
+        - order: 1
+          method: POST
+          read_only: true
+          url: https://www.formacion.cc/aula.php
+          form_data: {aula: "166361", modoCarga: "2", ssl: "0"}
+          expected_result:
+            status_code: 200
+        - order: 2
+          method: GET
+          url: https://www.formacion.cc/tutorias.php?modoCarga=2
+          expected_result:
+            status_code: 200
+        - order: 3
+          method: GET
+          url: https://www.formacion.cc/temario.php?modoCarga=1
+          expected_result:
+            status_code: 200
+            text_marker: "Índice"

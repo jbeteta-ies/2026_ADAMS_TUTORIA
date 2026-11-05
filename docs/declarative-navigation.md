@@ -72,7 +72,7 @@ lee `config.yaml` local.
 
 ## Plantilla YAML
 
-`config.yaml.example` incluye, dentro del elemento sintético de `sites`, una
+`config.example.yaml` incluye, dentro del elemento sintético de `sites`, una
 única plantilla comentada de tres pasos post-login: GET de preparación, POST de
 selección y GET de llegada a la página objetivo. Incluye `allowed_origin`,
 `params`, `form_data`, `aula`, `modoCarga`, `ssl`, `csrf_field`,
@@ -85,7 +85,7 @@ El cargador valida `navigation` anidada en cada sitio y la convierte a un
 `NavigationPlan` en memoria. Un sitio debe declarar exactamente uno de
 `target_url` (compatibilidad con la navegación simple existente) o
 `navigation`; declarar ambos es ambiguo y se rechaza. La plantilla comentada de
-`config.yaml.example` muestra la forma segura sin alterar el `config.yaml`
+`config.example.yaml` muestra la forma segura sin alterar el `config.yaml`
 local. El monitor reutiliza la sesión que devuelve el login y ejecuta el plan
 después del login y en cada recarga. No se debe copiar ningún valor de sesión al
 YAML.
