@@ -16,7 +16,7 @@ from adams_tutoria.response_metadata import ResponseMetadataDict, validate_respo
 _MAX_BYTES: Final = 1_048_576
 _BACKUP_COUNT: Final = 3
 _RETENTION_DAYS: Final = 30
-_ACTIONS: Final = frozenset({"startup", "login", "navigation", "reload"})
+_ACTIONS: Final = frozenset({"startup", "login", "navigation", "reload", "retry", "exit"})
 _CATEGORIES: Final = frozenset(
     {"config", "authentication", "navigation", "timeout", "blocked", "logging"}
 )
@@ -28,6 +28,8 @@ _MESSAGES: Final = frozenset(
         "Operación agotó el tiempo.",
         "Intervención humana requerida.",
         "Registro local no disponible.",
+        "Reintento por error recuperable.",
+        "Ventana finalizada; sesión cerrada.",
     }
 )
 
