@@ -67,7 +67,7 @@ jobs:
         run: uv run playwright install --with-deps chromium
 
       - name: Run the ADAMS worker
-        run: adams-monitor --config config.yaml --site adams-site --once-window
+        run: uv run --locked adams-monitor --config config.yaml --site adams-site --once-window
 
       - name: Upload ADAMS diagnostic logs
         if: always()
