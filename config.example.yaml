@@ -1,0 +1,50 @@
+# Generic website-monitoring template (schema_version: 1).
+# Copy to config.yaml and adapt the values. Never version real passwords.
+# This is a provider-neutral example, separate from config.adams.yaml.template.
+# The example.invalid values are fictional and must not be used in production.
+
+schema_version: 1
+
+sites:
+  - id: demo-site
+    provider: ADAMS
+    login_url: https://example.invalid/login
+    username: change-me
+    password: change-me
+    start_date: "2026-01-01"
+    end_date: "2026-12-31"
+    weekdays: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY]
+    start_time: "08:00"
+    end_time: "20:00"
+    timezone: Europe/Madrid
+    interval_seconds: 300
+    timeout_seconds: 30
+    max_retries: 2
+    log_file: data/local/logs/demo-site.log
+    navigation:
+      version: "1.0"
+      allowed_origin: https://example.invalid/
+      steps:
+        - order: 1
+          method: GET
+          url: https://example.invalid/courses
+          params: {view: "summary"}
+          timeout_seconds: 30
+          expected_result:
+            status_code: 200
+            url_path: /courses
+        - order: 2
+          method: POST
+          read_only: true
+          url: https://example.invalid/select-course
+          form_data: {course: "sample-course"}
+          expected_result:
+            status_code: 200
+        - order: 3
+          method: GET
+          url: https://example.invalid/course-content
+          expected_result:
+            status_code: 200
+            text_marker: "Contenido disponible"
+
+# Do not include cookies, tokens, secrets, or personal data in this template.

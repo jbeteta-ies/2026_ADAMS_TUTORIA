@@ -1,0 +1,83 @@
+name: Monitor ADAMS
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "20 16 * * 1-5"
+      timezone: Europe/Madrid
+
+concurrency:
+  group: adams-site
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 270
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.9.7"
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install project dependencies
+        run: uv sync --locked --dev
+
+      - name: Generate and validate effective ADAMS configuration
+        env:
+          ADAMS_USERNAME: ${{ secrets.ADAMS_USERNAME }}
+          ADAMS_PASSWORD: ${{ secrets.ADAMS_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$ADAMS_USERNAME" || { printf '%s\n' 'Missing required secret: ADAMS_USERNAME' >&2; exit 1; }
+          test -n "$ADAMS_PASSWORD" || { printf '%s\n' 'Missing required secret: ADAMS_PASSWORD' >&2; exit 1; }
+          uv run python - <<'PY'
+          import os
+          from pathlib import Path
+
+          import yaml
+
+          template = Path("config.adams.yaml.template")
+          output = Path("config.yaml")
+          data = yaml.safe_load(template.read_text(encoding="utf-8"))
+          site = data["sites"][0]
+          site["username"] = os.environ["ADAMS_USERNAME"]
+          site["password"] = os.environ["ADAMS_PASSWORD"]
+          output.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+          output.chmod(0o600)
+
+          from adams_tutoria.config import load_sites_config
+
+          configuration = load_sites_config(output)
+          if tuple(site.id for site in configuration.sites) != ("adams-site",):
+              raise SystemExit("effective configuration must contain only adams-site")
+          print("Effective ADAMS configuration validated without displaying secrets.")
+          PY
+
+      - name: Install Chromium and Playwright dependencies
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run the ADAMS worker
+        run: adams-monitor --config config.yaml --site adams-site --once-window
+
+      - name: Upload ADAMS diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adams-monitor-logs-${{ github.run_id }}
+          path: data/local/logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Remove effective configuration
+        if: always()
+        run: rm -f config.yaml
