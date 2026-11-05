@@ -14,7 +14,7 @@ sites:
     start_time: "15:30"
     end_time: "17:30"
     timezone: Europe/Madrid
-    interval_seconds: 60
+    interval_seconds: 300
     timeout_seconds: 30
     max_retries: 2
     log_file: data/local/logs/adams-site.log
