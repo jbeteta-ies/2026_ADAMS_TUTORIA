@@ -9,9 +9,9 @@ sites:
     username: "${ADAMS_USERNAME}"
     password: "${ADAMS_PASSWORD}"
     start_date: "2026-11-05"
-    end_date: "2026-11-D5"
+    end_date: "2026-11-05"
     weekdays: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY]
-    start_time: "12:28"
+    start_time: "12:30"
     end_time: "12:35"
     timezone: Europe/Madrid
     interval_seconds: 60
