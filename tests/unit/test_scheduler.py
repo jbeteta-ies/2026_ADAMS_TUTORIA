@@ -146,3 +146,41 @@ def test_overnight_end_date_includes_its_after_midnight_segment() -> None:
         scheduler.tick(datetime(2026, 1, 6, 1, 59, tzinfo=UTC))[0].kind is ScheduleEventKind.ENTER
     )
     assert scheduler.tick(datetime(2026, 1, 6, 2, 0, tzinfo=UTC))[0].kind is ScheduleEventKind.EXIT
+
+
+def test_overnight_boundary_and_date_range_are_explicit() -> None:
+    scheduler = SiteScheduler(
+        [
+            _site(
+                "night",
+                start_date=date(2026, 1, 5),
+                end_date=date(2026, 1, 5),
+                start_time=time(22, 50),
+                end_time=time(1),
+                weekdays=("MONDAY",),
+            )
+        ]
+    )
+    start_events = scheduler.tick(datetime(2026, 1, 5, 22, 50, tzinfo=UTC))
+    assert start_events[0].kind is ScheduleEventKind.ENTER
+    assert scheduler.tick(datetime(2026, 1, 6, 0, 0, tzinfo=UTC)) == ()
+    assert scheduler.is_active("night", datetime(2026, 1, 6, 0, 59, tzinfo=UTC))
+    assert not scheduler.is_active("night", datetime(2026, 1, 6, 1, 0, tzinfo=UTC))
+
+
+def test_two_consecutive_enabled_days_have_one_window_each() -> None:
+    scheduler = SiteScheduler(
+        [_site("weekday", weekdays=("MONDAY", "TUESDAY"), start_time=time(9), end_time=time(10))]
+    )
+
+    assert scheduler.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC))[0].kind is ScheduleEventKind.ENTER
+    assert scheduler.tick(datetime(2026, 1, 5, 10, 0, tzinfo=UTC))[0].kind is ScheduleEventKind.EXIT
+    assert scheduler.tick(datetime(2026, 1, 6, 9, 0, tzinfo=UTC))[0].kind is ScheduleEventKind.ENTER
+    assert scheduler.tick(datetime(2026, 1, 6, 10, 0, tzinfo=UTC))[0].kind is ScheduleEventKind.EXIT
+
+
+def test_weekend_is_not_allowed_when_only_weekdays_are_enabled() -> None:
+    scheduler = SiteScheduler([_site("weekday", weekdays=("MONDAY", "FRIDAY"))])
+
+    assert scheduler.tick(datetime(2026, 1, 10, 9, 0, tzinfo=UTC)) == ()  # Saturday
+    assert scheduler.tick(datetime(2026, 1, 11, 9, 0, tzinfo=UTC)) == ()  # Sunday

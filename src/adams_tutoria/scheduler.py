@@ -98,10 +98,10 @@ class SiteSchedule:
                 weekday_name in self._weekdays and self._start_time <= local_time < self._end_time
             )
         else:
-            # At or after midnight, inspect the preceding local date: that is
-            # the date whose weekday owns the overnight window.
-            previous_date = owner_date
-            previous_weekday = (
+            # Both portions of an overnight window are owned by the date on
+            # which it started.  In particular, do not let the weekday of the
+            # calendar date after midnight start a second window.
+            owner_weekday = (
                 "MONDAY",
                 "TUESDAY",
                 "WEDNESDAY",
@@ -109,9 +109,9 @@ class SiteSchedule:
                 "FRIDAY",
                 "SATURDAY",
                 "SUNDAY",
-            )[previous_date.weekday()]
-            active = (weekday_name in self._weekdays and local_time >= self._start_time) or (
-                previous_weekday in self._weekdays and local_time < self._end_time
+            )[owner_date.weekday()]
+            active = owner_weekday in self._weekdays and (
+                local_time >= self._start_time or local_time < self._end_time
             )
         return ScheduleState.ACTIVE if active else ScheduleState.INACTIVE
 
@@ -183,6 +183,18 @@ class SiteScheduler:
             elif state is ScheduleState.INACTIVE and previous is ScheduleState.ACTIVE:
                 events.append(ScheduleEvent(site_id, ScheduleEventKind.EXIT, now))
         return tuple(events)
+
+    def is_active(self, site_id: str, now: datetime) -> bool:
+        """Check one window without changing transition state."""
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("scheduler clock must return an aware datetime")
+        for runtime in self._sites:
+            if runtime.schedule.site_id == site_id:
+                return (
+                    runtime.invalid_message is None
+                    and runtime.schedule.state_at(now) is ScheduleState.ACTIVE
+                )
+        return False
 
     def run_forever(
         self,

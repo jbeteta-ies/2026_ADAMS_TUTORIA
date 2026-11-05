@@ -7,6 +7,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from math import isfinite
 from time import sleep
 from typing import Any
 
@@ -42,6 +43,13 @@ class _Runtime:
     session: Any | None = None
     next_reload: float = 0.0
     active: bool = False
+    last_monotonic: float | None = None
+
+
+MAX_RETRY_BACKOFF_SECONDS = 30.0
+_TERMINAL_NAVIGATION_CODES = frozenset(
+    {"expected_result_not_confirmed", "no_response", "csrf_field_missing"}
+)
 
 
 class MultiSiteMonitor:
@@ -53,6 +61,8 @@ class MultiSiteMonitor:
         *,
         browser_factory: Callable[[], Any],
         log_writer_factory: Callable[[SiteConfig], SiteLogWriter] = SiteLogWriter,
+        retry_backoff: Callable[[int], float] | None = None,
+        retry_wait: Callable[[float], None] = sleep,
     ) -> None:
         configured_sites = tuple(sites)
         self._scheduler = SiteScheduler(configured_sites)
@@ -75,6 +85,8 @@ class MultiSiteMonitor:
             else:
                 self._runtimes[site.id] = _Runtime(site, adapter)
         self._browser_factory = browser_factory
+        self._retry_backoff = retry_backoff or _default_retry_backoff
+        self._retry_wait = retry_wait
 
     def tick(self, now: datetime, *, monotonic: float) -> tuple[MonitorEvent, ...]:
         events: list[MonitorEvent] = []
@@ -87,6 +99,13 @@ class MultiSiteMonitor:
             elif schedule_event.kind is ScheduleEventKind.EXIT:
                 self._close(runtime)
                 runtime.active = False
+                self._logging_diagnostic(
+                    runtime,
+                    now,
+                    action="exit",
+                    result="success",
+                    error=None,
+                )
                 events.append(MonitorEvent(runtime.site.id, MonitorEventKind.EXIT, now))
             elif schedule_event.kind is ScheduleEventKind.INVALID:
                 events.append(
@@ -98,6 +117,8 @@ class MultiSiteMonitor:
                     )
                 )
         for runtime in self._runtimes.values():
+            if runtime.active and runtime.session is not None:
+                self._observe_clock(runtime, monotonic)
             if runtime.active and runtime.session is not None and monotonic >= runtime.next_reload:
                 events.extend(self._reload(runtime, now, monotonic))
         return tuple(events)
@@ -150,6 +171,31 @@ class MultiSiteMonitor:
                                     response_metadata=diagnostic.response_metadata,
                                 )
                             )
+                        terminal_diagnostic = diagnostics[-1] if diagnostics else None
+                        if terminal_diagnostic is not None and _is_terminal_navigation_failure(
+                            terminal_diagnostic
+                        ):
+                            with suppress(Exception):
+                                session.close()
+                            return [
+                                *events,
+                                *self._logged_events(
+                                    runtime,
+                                    now,
+                                    MonitorEvent(
+                                        runtime.site.id,
+                                        MonitorEventKind.ERROR,
+                                        now,
+                                        "Navegación no confirmada; sitio aislado.",
+                                        "navigation",
+                                        "validation",
+                                    ),
+                                    action="navigation",
+                                    result="error",
+                                    error=terminal_diagnostic.code,
+                                    response_metadata=terminal_diagnostic.response_metadata,
+                                ),
+                            ]
                         if (
                             not diagnostics
                             or diagnostics[-1].status is not NavigationStatus.SUCCESS
@@ -178,6 +224,7 @@ class MultiSiteMonitor:
                     runtime.session = session
                     runtime.active = True
                     runtime.next_reload = monotonic + runtime.site.interval_seconds
+                    runtime.last_monotonic = monotonic
                     return [
                         *events,
                         *self._logged_events(
@@ -188,12 +235,26 @@ class MultiSiteMonitor:
                             result="success",
                         ),
                     ]
-                if outcome.status.value == "blocked":
+                if outcome.status.value in {
+                    "blocked",
+                    "human_intervention_required",
+                    "captcha",
+                    "mfa",
+                    "session_expired",
+                }:
                     break
             except Exception:
                 pass
             if attempt == runtime.site.max_retries:
                 break
+            self._logging_diagnostic(
+                runtime,
+                now,
+                action="retry",
+                result="error",
+                error="login_retry",
+            )
+            self._retry_wait(self._safe_retry_backoff(attempt))
         runtime.active = False
         return [
             *events,
@@ -217,6 +278,19 @@ class MultiSiteMonitor:
     def _reload(self, runtime: _Runtime, now: datetime, monotonic: float) -> list[MonitorEvent]:
         assert runtime.session is not None
         for attempt in range(runtime.site.max_retries + 1):
+            # Check immediately before every request, including retries.
+            if not self._scheduler.is_active(runtime.site.id, now):
+                self._close(runtime)
+                runtime.active = False
+                return [
+                    *self._logged_events(
+                        runtime,
+                        now,
+                        MonitorEvent(runtime.site.id, MonitorEventKind.EXIT, now),
+                        action="exit",
+                        result="success",
+                    )
+                ]
             try:
                 navigation_metadata = None
                 if runtime.site.navigation is not None:
@@ -240,6 +314,70 @@ class MultiSiteMonitor:
                             )
                         )
                     if not diagnostics or diagnostics[-1].status is not NavigationStatus.SUCCESS:
+                        terminal_diagnostic = diagnostics[-1] if diagnostics else None
+                        if terminal_diagnostic is not None and _is_terminal_navigation_failure(
+                            terminal_diagnostic
+                        ):
+                            self._close(runtime)
+                            runtime.active = False
+                            return [
+                                *navigation_events,
+                                *self._logged_events(
+                                    runtime,
+                                    now,
+                                    MonitorEvent(
+                                        runtime.site.id,
+                                        MonitorEventKind.ERROR,
+                                        now,
+                                        "Recarga no confirmada; sitio aislado.",
+                                        "reload",
+                                        "validation",
+                                    ),
+                                    action="reload",
+                                    result="error",
+                                    error=terminal_diagnostic.code,
+                                    response_metadata=terminal_diagnostic.response_metadata,
+                                ),
+                            ]
+                        terminal = (
+                            diagnostics[-1].status if diagnostics else NavigationStatus.FAILED
+                        )
+                        if terminal in {
+                            NavigationStatus.BLOCKED,
+                            NavigationStatus.SESSION_EXPIRED,
+                            NavigationStatus.CANCELLED,
+                        }:
+                            self._close(runtime)
+                            runtime.active = False
+                            category = (
+                                "blocked"
+                                if terminal is NavigationStatus.BLOCKED
+                                else "authentication"
+                                if terminal is NavigationStatus.SESSION_EXPIRED
+                                else "navigation"
+                            )
+                            return [
+                                *navigation_events,
+                                *self._logged_events(
+                                    runtime,
+                                    now,
+                                    MonitorEvent(
+                                        runtime.site.id,
+                                        MonitorEventKind.ERROR,
+                                        now,
+                                        "Recarga no completada; sitio aislado.",
+                                        "reload",
+                                        category,
+                                    ),
+                                    action="reload",
+                                    result="error",
+                                    error=(
+                                        "human_intervention_required"
+                                        if terminal is NavigationStatus.BLOCKED
+                                        else "session_expired"
+                                    ),
+                                ),
+                            ]
                         raise RuntimeError("navigation failed")
                 else:
                     navigation_events = []
@@ -248,6 +386,7 @@ class MultiSiteMonitor:
                         runtime.site.target_url, timeout_seconds=runtime.site.timeout_seconds
                     )
                 runtime.next_reload = monotonic + runtime.site.interval_seconds
+                runtime.last_monotonic = monotonic
                 return [
                     *navigation_events,
                     *self._logged_events(
@@ -281,6 +420,14 @@ class MultiSiteMonitor:
                             response_metadata=navigation_metadata,
                         ),
                     ]
+                self._logging_diagnostic(
+                    runtime,
+                    now,
+                    action="retry",
+                    result="error",
+                    error="reload_retry",
+                )
+                self._retry_wait(self._safe_retry_backoff(attempt))
         raise AssertionError("unreachable")
 
     def _logged_events(
@@ -387,6 +534,17 @@ class MultiSiteMonitor:
                 runtime.session.close()
             runtime.session = None
 
+    def _safe_retry_backoff(self, attempt: int) -> float:
+        """Return a finite, non-negative delay even for an injected policy."""
+        try:
+            value = self._retry_backoff(attempt)
+            delay = float(value)
+        except (ArithmeticError, TypeError, ValueError, OverflowError):
+            return 0.0
+        if not isfinite(delay):
+            return 0.0
+        return min(MAX_RETRY_BACKOFF_SECONDS, max(0.0, delay))
+
     def run_forever(
         self,
         *,
@@ -407,6 +565,13 @@ class MultiSiteMonitor:
         for runtime in self._runtimes.values():
             self._close(runtime)
 
+    @staticmethod
+    def _observe_clock(runtime: _Runtime, monotonic: float) -> None:
+        previous = runtime.last_monotonic
+        if previous is not None and (monotonic < previous or monotonic - previous > 7200):
+            runtime.next_reload = monotonic
+        runtime.last_monotonic = monotonic
+
 
 __all__ = ["MonitorEvent", "MonitorEventKind", "MultiSiteMonitor"]
 
@@ -423,9 +588,31 @@ def _safe_diagnostic(error: str | None, action: str, result: str) -> tuple[str |
             return "timeout", "Operación agotó el tiempo."
         if error in {"blocked", "human_intervention_required"}:
             return "blocked", "Intervención humana requerida."
+        if error == "session_expired":
+            return "authentication", "Login no confirmado."
         return "navigation", "Navegación no confirmada."
+    if action == "retry":
+        return "navigation", "Reintento por error recuperable."
+    if action == "exit":
+        return "config", "Ventana finalizada; sesión cerrada."
     if action == "reload":
         if error == "timeout":
             return "timeout", "Operación agotó el tiempo."
+        if error == "scheduled_exit":
+            return "config", "Ventana finalizada; sesión cerrada."
         return "navigation", "Navegación no confirmada."
     return "logging", "Registro local no disponible."
+
+
+def _default_retry_backoff(attempt: int) -> float:
+    return min(MAX_RETRY_BACKOFF_SECONDS, float(2**attempt))
+
+
+def _is_terminal_navigation_failure(diagnostic: Any) -> bool:
+    """Validation failures are terminal, not evidence of an expired session."""
+    if diagnostic.code in _TERMINAL_NAVIGATION_CODES:
+        return True
+    metadata = diagnostic.response_metadata
+    return bool(
+        metadata is not None and metadata.get("expected_result_match") in {"no", "not_checkable"}
+    )

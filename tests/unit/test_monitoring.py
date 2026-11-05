@@ -3,8 +3,16 @@
 import json
 from datetime import UTC, datetime, time
 
+import pytest
+
 from adams_tutoria.config import SiteConfig
-from adams_tutoria.declarative_navigation import ExpectedResult, NavigationPlan, NavigationStep
+from adams_tutoria.declarative_navigation import (
+    ExpectedResult,
+    NavigationDiagnostic,
+    NavigationPlan,
+    NavigationStatus,
+    NavigationStep,
+)
 from adams_tutoria.monitoring import MonitorEventKind, MultiSiteMonitor
 
 
@@ -52,6 +60,17 @@ class RetryingAdapter:
         return type("Outcome", (), {"status": type("Status", (), {"value": status})()})(), (
             self.session if status == "success" else None
         )
+
+
+class StatusAdapter:
+    def __init__(self, status: str) -> None:
+        self.status = status
+        self.calls = 0
+
+    def login_session(self, request: object, *, browser_api: object) -> tuple[object, None]:
+        del request, browser_api
+        self.calls += 1
+        return type("Outcome", (), {"status": type("Status", (), {"value": self.status})()})(), None
 
 
 def site(site_id: str, target: str, *, max_retries: int = 1) -> SiteConfig:
@@ -216,6 +235,343 @@ def test_max_retries_is_number_of_retries_after_first_attempt(monkeypatch) -> No
 
     assert adapter.calls == 2 + 1
     assert events[0].kind is MonitorEventKind.LOGIN
+
+
+def test_retry_backoff_is_injected_and_bounded_without_extra_attempts(monkeypatch) -> None:
+    session = Session()
+    adapter = RetryingAdapter(failures=10, session=session)
+    waits: list[float] = []
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: adapter)
+    monitor = MultiSiteMonitor(
+        [site("one", "https://example.invalid/one", max_retries=2)],
+        browser_factory=lambda: object(),
+        retry_backoff=lambda attempt: min(30.0, 2**attempt),
+        retry_wait=waits.append,
+    )
+
+    monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+
+    assert adapter.calls == 3
+    assert waits == [1, 2]
+
+
+def test_invalid_injected_backoff_is_finite_non_negative_and_bounded(monkeypatch) -> None:
+    session = Session()
+    adapter = RetryingAdapter(failures=10, session=session)
+    waits: list[float] = []
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: adapter)
+    values = iter((-10.0, float("nan"), float("inf"), 9999.0))
+    monitor = MultiSiteMonitor(
+        [site("one", "https://example.invalid/one", max_retries=4)],
+        browser_factory=lambda: object(),
+        retry_backoff=lambda _: next(values),
+        retry_wait=waits.append,
+    )
+
+    monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+
+    assert adapter.calls == 5
+    assert waits == [0.0, 0.0, 0.0, 30.0]
+
+
+def test_captcha_and_mfa_login_outcomes_are_terminal(monkeypatch) -> None:
+    for status in ("captcha", "mfa"):
+        adapter = StatusAdapter(status)
+        waits: list[float] = []
+        monkeypatch.setattr(
+            "adams_tutoria.monitoring.adapter_for_site", lambda _, current=adapter: current
+        )
+        monitor = MultiSiteMonitor(
+            [site("one", "https://example.invalid/one", max_retries=3)],
+            browser_factory=lambda: object(),
+            retry_wait=waits.append,
+        )
+
+        events = monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+
+        assert adapter.calls == 1
+        assert waits == []
+        assert any(event.kind is MonitorEventKind.ERROR for event in events)
+
+
+def test_human_intervention_required_is_blocked_without_success_or_automatic_action(
+    monkeypatch,
+) -> None:
+    adapter = StatusAdapter("human_intervention_required")
+    waits: list[float] = []
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: adapter)
+    monitor = MultiSiteMonitor(
+        [site("human-check", "https://example.invalid/synthetic", max_retries=3)],
+        browser_factory=lambda: object(),
+        retry_wait=waits.append,
+    )
+
+    events = monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+
+    assert adapter.calls == 1
+    assert waits == []
+    assert all(event.kind is not MonitorEventKind.LOGIN for event in events)
+    assert all(event.kind is not MonitorEventKind.RELOAD for event in events)
+    assert any(event.kind is MonitorEventKind.ERROR for event in events)
+
+
+def test_expired_session_is_terminal_without_login_retry(monkeypatch) -> None:
+    adapter = StatusAdapter("session_expired")
+    waits: list[float] = []
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: adapter)
+    monitor = MultiSiteMonitor(
+        [site("one", "https://example.invalid/one", max_retries=2)],
+        browser_factory=lambda: object(),
+        retry_wait=waits.append,
+    )
+
+    monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+
+    assert adapter.calls == 1
+    assert waits == []
+
+
+def test_validation_not_confirmed_is_terminal_and_not_session_expired(monkeypatch) -> None:
+    session = Session()
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: Adapter(session))
+
+    class FailedDiagnostic:
+        status = "failed"
+        code = "expected_result_not_confirmed"
+        response_metadata = {
+            "expected_result_match": "not_checkable",
+        }
+
+    monkeypatch.setattr(
+        "adams_tutoria.monitoring.NavigationExecutor.execute",
+        lambda self, plan: (FailedDiagnostic(),),
+    )
+    configured = SiteConfig(
+        "one",
+        "SYNTHETIC",
+        "https://example.invalid/login",
+        None,
+        "synthetic-user",
+        "synthetic-password",
+        start_time=time(9),
+        end_time=time(10),
+        weekdays=("MONDAY",),
+        interval_seconds=10,
+        timeout_seconds=7,
+        max_retries=2,
+        navigation=NavigationPlan(
+            "1.0",
+            (
+                NavigationStep(
+                    1,
+                    "GET",
+                    "https://example.invalid/target",
+                    expected=ExpectedResult(text_marker="ok"),
+                ),
+            ),
+            "https://example.invalid",
+        ),
+    )
+    monitor = MultiSiteMonitor([configured], browser_factory=lambda: object())
+
+    events = monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+
+    assert session.closed
+    assert any(event.category == "validation" for event in events)
+    assert all(event.category != "authentication" for event in events)
+
+
+@pytest.mark.parametrize("code", ["no_response", "csrf_field_missing"])
+def test_terminal_navigation_codes_are_not_retried_by_monitor(monkeypatch, code: str) -> None:
+    session = Session()
+    executor_calls = 0
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: Adapter(session))
+
+    def execute(_self: object, _plan: NavigationPlan) -> tuple[NavigationDiagnostic, ...]:
+        nonlocal executor_calls
+        executor_calls += 1
+        return (NavigationDiagnostic(NavigationStatus.FAILED, code),)
+
+    monkeypatch.setattr("adams_tutoria.monitoring.NavigationExecutor.execute", execute)
+    configured = SiteConfig(
+        "terminal-navigation",
+        "SYNTHETIC",
+        "https://example.invalid/login",
+        None,
+        "synthetic-user",
+        "synthetic-password",
+        start_time=time(9),
+        end_time=time(10),
+        weekdays=("MONDAY",),
+        max_retries=3,
+        navigation=NavigationPlan(
+            "1.0",
+            (
+                NavigationStep(
+                    1,
+                    "GET",
+                    "https://example.invalid/target",
+                    expected=ExpectedResult(text_marker="ok"),
+                ),
+            ),
+            "https://example.invalid",
+        ),
+    )
+    monitor = MultiSiteMonitor([configured], browser_factory=lambda: object())
+
+    events = monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+
+    assert executor_calls == 1
+    assert session.closed
+    assert any(event.category == "validation" for event in events)
+
+
+@pytest.mark.parametrize("code", ["captcha", "mfa"])
+def test_reload_human_intervention_is_terminal_without_retry(monkeypatch, code: str) -> None:
+    session = Session()
+    executor_calls = 0
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: Adapter(session))
+
+    def execute(_self: object, _plan: NavigationPlan) -> tuple[NavigationDiagnostic, ...]:
+        nonlocal executor_calls
+        executor_calls += 1
+        return (NavigationDiagnostic(NavigationStatus.BLOCKED, code),)
+
+    monkeypatch.setattr("adams_tutoria.monitoring.NavigationExecutor.execute", execute)
+    configured = SiteConfig(
+        "reload-intervention",
+        "SYNTHETIC",
+        "https://example.invalid/login",
+        None,
+        "synthetic-user",
+        "synthetic-password",
+        start_time=time(9),
+        end_time=time(10),
+        weekdays=("MONDAY",),
+        interval_seconds=10,
+        max_retries=3,
+        navigation=NavigationPlan(
+            "1.0",
+            (
+                NavigationStep(
+                    1,
+                    "GET",
+                    "https://example.invalid/target",
+                    expected=ExpectedResult(text_marker="ok"),
+                ),
+            ),
+            "https://example.invalid",
+        ),
+    )
+    monitor = MultiSiteMonitor([configured], browser_factory=lambda: object())
+
+    # Login succeeds because the first navigation call is reserved for reload.
+    def login_then_blocked(self: object, plan: NavigationPlan) -> tuple[NavigationDiagnostic, ...]:
+        nonlocal executor_calls
+        if executor_calls == 0:
+            return_value = (NavigationDiagnostic(NavigationStatus.SUCCESS, "step_succeeded"),)
+            # Keep the first call visible to the subsequent reload call.
+            executor_calls = 1
+            return return_value
+        return execute(self, plan)
+
+    monkeypatch.setattr("adams_tutoria.monitoring.NavigationExecutor.execute", login_then_blocked)
+
+    monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+    events = monitor.tick(datetime(2026, 1, 5, 9, 0, 10, tzinfo=UTC), monotonic=10)
+
+    assert executor_calls == 2
+    assert session.closed
+    assert any(event.category == "blocked" for event in events)
+
+
+def test_navigation_errors_are_retried_only_up_to_configured_limit(monkeypatch) -> None:
+    session = Session()
+    executor_calls = 0
+    waits: list[float] = []
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: Adapter(session))
+
+    def execute(_self: object, _plan: NavigationPlan) -> tuple[NavigationDiagnostic, ...]:
+        nonlocal executor_calls
+        executor_calls += 1
+        return (NavigationDiagnostic(NavigationStatus.FAILED, "navigation_error"),)
+
+    monkeypatch.setattr("adams_tutoria.monitoring.NavigationExecutor.execute", execute)
+    configured = SiteConfig(
+        "reload-retries",
+        "SYNTHETIC",
+        "https://example.invalid/login",
+        None,
+        "synthetic-user",
+        "synthetic-password",
+        start_time=time(9),
+        end_time=time(10),
+        weekdays=("MONDAY",),
+        interval_seconds=10,
+        max_retries=2,
+        navigation=NavigationPlan(
+            "1.0",
+            (
+                NavigationStep(
+                    1,
+                    "GET",
+                    "https://example.invalid/target",
+                    expected=ExpectedResult(text_marker="ok"),
+                ),
+            ),
+            "https://example.invalid",
+        ),
+    )
+    monitor = MultiSiteMonitor(
+        [configured], browser_factory=lambda: object(), retry_wait=waits.append
+    )
+
+    # The login navigation succeeds; every subsequent navigation attempt fails.
+    def login_then_fail(self: object, plan: NavigationPlan) -> tuple[NavigationDiagnostic, ...]:
+        nonlocal executor_calls
+        if executor_calls == 0:
+            executor_calls = 1
+            return (NavigationDiagnostic(NavigationStatus.SUCCESS, "step_succeeded"),)
+        return execute(self, plan)
+
+    monkeypatch.setattr("adams_tutoria.monitoring.NavigationExecutor.execute", login_then_fail)
+
+    monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+    events = monitor.tick(datetime(2026, 1, 5, 9, 0, 10, tzinfo=UTC), monotonic=10)
+
+    assert executor_calls == 4
+    assert len(waits) == 2
+    assert session.closed
+    assert any(event.kind is MonitorEventKind.ERROR for event in events)
+
+
+def test_scheduled_exit_closes_session_and_never_reloads_after_exit(monkeypatch) -> None:
+    session = Session()
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: Adapter(session))
+    monitor = MultiSiteMonitor(
+        [site("one", "https://example.invalid/one")], browser_factory=lambda: object()
+    )
+    monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+    events = monitor.tick(datetime(2026, 1, 5, 10, 0, tzinfo=UTC), monotonic=10)
+
+    assert any(event.kind is MonitorEventKind.EXIT for event in events)
+    assert session.closed
+    assert session.urls == []
+    assert monitor.tick(datetime(2026, 1, 5, 10, 1, tzinfo=UTC), monotonic=20) == ()
+
+
+def test_suspend_resume_does_not_replay_missed_reloads(monkeypatch) -> None:
+    session = Session()
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: Adapter(session))
+    monitor = MultiSiteMonitor(
+        [site("one", "https://example.invalid/one")], browser_factory=lambda: object()
+    )
+    monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+    monitor.tick(datetime(2026, 1, 5, 9, 0, 1, tzinfo=UTC), monotonic=1)
+    events = monitor.tick(datetime(2026, 1, 5, 9, 30, tzinfo=UTC), monotonic=1801)
+
+    assert [event.kind for event in events] == [MonitorEventKind.RELOAD]
+    assert session.urls == ["https://example.invalid/one"]
 
 
 def test_unknown_provider_isolated_from_other_sites(monkeypatch) -> None:
@@ -401,7 +757,12 @@ def test_configured_log_path_and_early_failure_diagnostic_are_safe(tmp_path, mon
 
     assert configured_path.exists()
     records = [json.loads(line) for line in configured_path.read_text().splitlines()]
-    assert [record["action"] for record in records] == ["startup", "login"]
+    assert [record["action"] for record in records] == [
+        "startup",
+        "retry",
+        "retry",
+        "login",
+    ]
     assert records[-1]["result"] == "error"
     assert records[-1]["category"] == "authentication"
     assert records[-1]["message"] == "Login no confirmado."

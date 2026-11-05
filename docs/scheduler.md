@@ -35,7 +35,7 @@ del sitio y estados operativos seguros.
 
 ## Logs locales por sitio
 
-Los eventos de `login` y `reload` se escriben en el `log_file` configurado para
+Los eventos de `startup`, `login`, `navigation`, `reload`, `retry` y `exit` se escriben en el `log_file` configurado para
 cada sitio como una línea JSON con `timestamp`, `site_id`, `provider`, `action`
 y `result`. Los errores solo usan el diagnóstico fijo `operation failed`; no se
 copian excepciones, URLs, respuestas, HTML, cabeceras, cookies, tokens,
@@ -49,3 +49,44 @@ debe recrearse en el repositorio.
 Si el destino no puede escribirse, el monitor emite un evento de error seguro
 para ese sitio y continúa procesando los demás sitios. El fallo del logger no
 propaga excepciones al ciclo de monitorización.
+
+## Suspensión, reintentos y diagnóstico
+
+El bucle consulta el reloj en cada iteración. Tras una suspensión del equipo no
+reproduce los intervalos vencidos: la siguiente consulta solo produce la
+transición que corresponda a la hora actual. Si la ventana ya terminó, produce
+`EXIT` y cierra la sesión; si sigue activa, permite como máximo una recarga en
+esa iteración y recalcula el siguiente intervalo.
+
+`max_retries` cuenta reintentos adicionales al intento inicial. Los fallos
+recuperables se registran con acción `retry` y respetan el límite de la ventana.
+El backoff predeterminado es finito y está limitado a 30 segundos; una prueba
+puede inyectar una política y un reloj de espera sin cambiar el YAML. Los
+valores inyectados negativos, infinitos, NaN o no numéricos se convierten en
+espera cero; los valores positivos excesivos se acotan a 30 segundos.
+CAPTCHA, MFA, bloqueo y caducidad de sesión no se reintentan automáticamente.
+El cierre normal de una ventana se registra como acción `exit`, separado de los
+errores de navegación o autenticación.
+
+Una respuesta `human_intervention_required` es un bloqueo terminal: no se
+considera login correcto, no genera una sesión activa y no dispara reintentos ni
+otra acción automática. Este comportamiento está cubierto por una prueba con
+un sitio y credenciales sintéticos.
+
+La línea `response_metadata.expected_result_match: not_checkable` significa que
+no había una señal de respuesta evaluable en ese paso (por ejemplo, una
+respuesta no disponible o sin el atributo comprobable); no demuestra por sí
+sola que la sesión haya caducado. Tanto `expected_result_not_confirmed` como
+`not_checkable` son resultados terminales del monitor: no se reintentan ni se
+reinterpretan como `session_expired`. La navegación conserva el diagnóstico
+seguro del paso para distinguirlo de `session_expired`, bloqueo o una validación
+no confirmada.
+
+## Validación manual de una ventana nocturna
+
+Con un sitio sintético y un log local ignorado, comprobar en la zona horaria
+configurada: (1) `ENTER` y login a las 22:50, (2) una recarga por intervalo
+mientras la ventana está activa, (3) ninguna nueva entrada a las 00:00, (4)
+`EXIT` exactamente a la 01:00 y cierre de sesión, y (5) ninguna petición
+posterior. Esta comprobación requiere observar solo identificadores de sitio y
+estados; nunca cookies, credenciales, tokens, cuerpos o datos personales.
