@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from logging import LogRecord
 from logging.handlers import RotatingFileHandler
@@ -32,6 +33,9 @@ _MESSAGES: Final = frozenset(
         "Ventana finalizada; sesión cerrada.",
     }
 )
+_RUN_ID_PATTERN: Final = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 
 
 def _safe_label(value: str) -> str:
@@ -54,6 +58,7 @@ class SiteLogWriter:
         max_bytes: int = _MAX_BYTES,
         backup_count: int = _BACKUP_COUNT,
         retention_days: int = _RETENTION_DAYS,
+        run_id: str | None = None,
     ) -> None:
         if max_bytes < 1 or backup_count < 0 or retention_days < 1:
             raise ValueError("logging limits must be positive")
@@ -62,6 +67,7 @@ class SiteLogWriter:
         self._max_bytes = max_bytes
         self._backup_count = backup_count
         self._retention_days = retention_days
+        self._run_id = run_id if run_id is not None and _RUN_ID_PATTERN.fullmatch(run_id) else None
 
     @property
     def path(self) -> Path:
@@ -95,6 +101,8 @@ class SiteLogWriter:
             "action": action,
             "result": result,
         }
+        if self._run_id is not None:
+            record["run_id"] = self._run_id
         if result == "error":
             assert category is not None and message is not None
             record["category"] = category

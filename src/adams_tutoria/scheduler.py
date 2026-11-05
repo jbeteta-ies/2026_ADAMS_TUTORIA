@@ -24,6 +24,12 @@ class ScheduleState(StrEnum):
     INVALID = "invalid"
 
 
+class WindowPhase(StrEnum):
+    BEFORE = "before"
+    ACTIVE = "active"
+    AFTER = "after"
+
+
 class ScheduleEventKind(StrEnum):
     ENTER = "enter"
     EXIT = "exit"
@@ -115,6 +121,46 @@ class SiteSchedule:
             )
         return ScheduleState.ACTIVE if active else ScheduleState.INACTIVE
 
+    def phase_at(self, now: datetime) -> WindowPhase:
+        """Classify the current scheduled occurrence for one-shot workers."""
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("scheduler clock must return an aware datetime")
+        local = now.astimezone(self._timezone)
+        local_time = local.time()
+        overnight = self._start_time > self._end_time
+        at_overnight_end = overnight and local_time == self._end_time
+        owner_date = (
+            local.date().fromordinal(local.date().toordinal() - 1)
+            if overnight and local_time <= self._end_time
+            else local.date()
+        )
+        if self._start_date and owner_date < self._start_date:
+            return WindowPhase.BEFORE
+        if self._end_date and owner_date > self._end_date:
+            return WindowPhase.AFTER
+        weekday = (
+            "MONDAY",
+            "TUESDAY",
+            "WEDNESDAY",
+            "THURSDAY",
+            "FRIDAY",
+            "SATURDAY",
+            "SUNDAY",
+        )[owner_date.weekday()]
+        if weekday not in self._weekdays:
+            return WindowPhase.BEFORE
+        if overnight:
+            if at_overnight_end:
+                return WindowPhase.AFTER
+            return (
+                WindowPhase.ACTIVE
+                if local_time >= self._start_time or local_time < self._end_time
+                else WindowPhase.BEFORE
+            )
+        if local_time < self._start_time:
+            return WindowPhase.BEFORE
+        return WindowPhase.AFTER if local_time >= self._end_time else WindowPhase.ACTIVE
+
 
 @dataclass
 class _SiteRuntime:
@@ -196,6 +242,14 @@ class SiteScheduler:
                 )
         return False
 
+    def phase(self, site_id: str, now: datetime) -> WindowPhase:
+        for runtime in self._sites:
+            if runtime.schedule.site_id == site_id:
+                if runtime.invalid_message is not None:
+                    return WindowPhase.AFTER
+                return runtime.schedule.phase_at(now)
+        return WindowPhase.AFTER
+
     def run_forever(
         self,
         *,
@@ -214,4 +268,11 @@ class SiteScheduler:
             wait(self.poll_seconds)
 
 
-__all__ = ["ScheduleEvent", "ScheduleEventKind", "ScheduleState", "SiteSchedule", "SiteScheduler"]
+__all__ = [
+    "ScheduleEvent",
+    "ScheduleEventKind",
+    "ScheduleState",
+    "SiteSchedule",
+    "SiteScheduler",
+    "WindowPhase",
+]

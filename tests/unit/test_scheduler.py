@@ -3,7 +3,13 @@
 from datetime import UTC, date, datetime, time
 
 from adams_tutoria.config import SiteConfig
-from adams_tutoria.scheduler import ScheduleEventKind, ScheduleState, SiteScheduler
+from adams_tutoria.scheduler import (
+    ScheduleEventKind,
+    ScheduleState,
+    SiteSchedule,
+    SiteScheduler,
+    WindowPhase,
+)
 
 
 def _site(site_id: str, **overrides: object) -> SiteConfig:
@@ -108,6 +114,24 @@ def test_schedule_state_is_available_for_direct_evaluation() -> None:
 
     schedule = SiteSchedule(_site("demo"))
     assert schedule.state_at(datetime(2026, 1, 5, 9, 30, tzinfo=UTC)) is ScheduleState.ACTIVE
+
+
+def test_run_window_phase_is_before_active_and_after_with_exact_close() -> None:
+    schedule = SiteSchedule(_site("demo"))
+    assert schedule.phase_at(datetime(2026, 1, 5, 8, 59, tzinfo=UTC)) is WindowPhase.BEFORE
+    assert schedule.phase_at(datetime(2026, 1, 5, 9, 0, tzinfo=UTC)) is WindowPhase.ACTIVE
+    assert schedule.phase_at(datetime(2026, 1, 5, 10, 0, tzinfo=UTC)) is WindowPhase.AFTER
+
+
+def test_run_window_phase_handles_overnight_window_without_second_start() -> None:
+    schedule = SiteSchedule(
+        _site("night", start_time=time(22), end_time=time(2), weekdays=("MONDAY",))
+    )
+    assert schedule.phase_at(datetime(2026, 1, 5, 21, 59, tzinfo=UTC)) is WindowPhase.BEFORE
+    assert schedule.phase_at(datetime(2026, 1, 5, 22, tzinfo=UTC)) is WindowPhase.ACTIVE
+    assert schedule.phase_at(datetime(2026, 1, 6, 1, 59, tzinfo=UTC)) is WindowPhase.ACTIVE
+    assert schedule.phase_at(datetime(2026, 1, 6, 2, tzinfo=UTC)) is WindowPhase.AFTER
+    assert schedule.phase_at(datetime(2026, 1, 6, 22, tzinfo=UTC)) is WindowPhase.BEFORE
 
 
 def test_overnight_window_uses_start_weekday_and_exclusive_end() -> None:

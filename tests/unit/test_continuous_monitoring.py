@@ -1,10 +1,13 @@
 """Synthetic tests for the continuous monitoring command."""
 
+from datetime import UTC, datetime, time
 from pathlib import Path
 from threading import Event
 
 import adams_tutoria.continuous_monitoring as continuous_monitoring
+from adams_tutoria.config import SiteConfig
 from adams_tutoria.continuous_monitoring import CONFIG_ERROR, RUNTIME_ERROR, SUCCESS, run_continuous
+from adams_tutoria.monitoring import MultiSiteMonitor
 
 VALID = """
 schema_version: 1
@@ -121,3 +124,80 @@ def test_runtime_failure_returns_safe_status_and_still_closes(tmp_path: Path) ->
         == RUNTIME_ERROR
     )
     assert closed == ["resource"]
+
+
+def test_unknown_site_is_rejected_before_playwright(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(VALID, encoding="utf-8")
+    opened = False
+
+    def browser_factory():
+        nonlocal opened
+        opened = True
+        return object()
+
+    assert (
+        run_continuous(
+            path,
+            site_id="missing",
+            once_window=True,
+            browser_factory=browser_factory,
+        )
+        == CONFIG_ERROR
+    )
+    assert not opened
+
+
+def test_cli_once_window_requires_site_without_starting_monitor(
+    tmp_path: Path, monkeypatch
+) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(VALID, encoding="utf-8")
+    created = False
+
+    def factory(*args, **kwargs):
+        nonlocal created
+        created = True
+        return FakeMonitor(*args, **kwargs)
+
+    monkeypatch.setattr(continuous_monitoring, "MultiSiteMonitor", factory)
+    monkeypatch.setattr(continuous_monitoring, "_install_signal_handlers", lambda event: {})
+    monkeypatch.setattr(continuous_monitoring, "_restore_signal_handlers", lambda previous: None)
+
+    assert continuous_monitoring.main(["--config", str(path), "--once-window"]) == CONFIG_ERROR
+    assert not created
+
+
+def test_once_window_waits_on_non_enabled_day_without_opening_browser(monkeypatch) -> None:
+    configured = SiteConfig(
+        "synthetic-site",
+        "BETA",
+        "https://example.invalid/login",
+        "https://example.invalid/target",
+        "synthetic-user",
+        "synthetic-password",
+        start_time=time(9),
+        end_time=time(10),
+        weekdays=("MONDAY",),
+    )
+    opened = False
+    waits: list[float] = []
+    stop = Event()
+    ticks = iter((datetime(2026, 1, 6, 9, 30, tzinfo=UTC),))
+
+    def browser_factory():
+        nonlocal opened
+        opened = True
+        return object()
+
+    monitor = MultiSiteMonitor([configured], browser_factory=browser_factory)
+    monitor.run_window(
+        configured.id,
+        clock=lambda: next(ticks),
+        monotonic=lambda: 0.0,
+        wait=lambda seconds: (waits.append(seconds), stop.set()),
+        should_stop=stop.is_set,
+    )
+
+    assert not opened
+    assert waits == [1.0]

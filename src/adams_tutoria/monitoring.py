@@ -10,11 +10,12 @@ from enum import StrEnum
 from math import isfinite
 from time import sleep
 from typing import Any
+from uuid import UUID, uuid4
 
 from adams_tutoria.config import SiteConfig
 from adams_tutoria.declarative_navigation import NavigationExecutor, NavigationStatus
 from adams_tutoria.login_adapters import LoginAdapter, adapter_for_site, request_from_site
-from adams_tutoria.scheduler import ScheduleEventKind, SiteScheduler
+from adams_tutoria.scheduler import ScheduleEventKind, SiteScheduler, WindowPhase
 from adams_tutoria.site_logging import SiteLogWriter
 
 
@@ -33,6 +34,7 @@ class MonitorEvent:
     message: str = ""
     phase: str | None = None
     category: str | None = None
+    run_id: str | None = None
 
 
 @dataclass
@@ -63,16 +65,28 @@ class MultiSiteMonitor:
         log_writer_factory: Callable[[SiteConfig], SiteLogWriter] = SiteLogWriter,
         retry_backoff: Callable[[int], float] | None = None,
         retry_wait: Callable[[float], None] = sleep,
+        run_id: str | None = None,
     ) -> None:
         configured_sites = tuple(sites)
         self._scheduler = SiteScheduler(configured_sites)
+        candidate_run_id = run_id or str(uuid4())
+        try:
+            parsed_run_id = UUID(candidate_run_id)
+            if parsed_run_id.version != 4:
+                raise ValueError("run identifier must be UUID4")
+        except (AttributeError, ValueError):
+            parsed_run_id = uuid4()
+        self.run_id = str(parsed_run_id)
         self._runtimes: dict[str, _Runtime] = {}
         self._loggers: dict[str, SiteLogWriter | None] = {}
         self._logger_failures: set[str] = set()
         self._logger_diagnostics: set[str] = set()
         for site in configured_sites:
             try:
-                self._loggers[site.id] = log_writer_factory(site)
+                if log_writer_factory is SiteLogWriter:
+                    self._loggers[site.id] = SiteLogWriter(site, run_id=self.run_id)
+                else:
+                    self._loggers[site.id] = log_writer_factory(site)
             except Exception:
                 self._loggers[site.id] = None
                 self._logger_failures.add(site.id)
@@ -87,6 +101,11 @@ class MultiSiteMonitor:
         self._browser_factory = browser_factory
         self._retry_backoff = retry_backoff or _default_retry_backoff
         self._retry_wait = retry_wait
+
+    @property
+    def run_identifier(self) -> str:
+        """Return the opaque identifier shared by this worker's diagnostics."""
+        return self.run_id
 
     def tick(self, now: datetime, *, monotonic: float) -> tuple[MonitorEvent, ...]:
         events: list[MonitorEvent] = []
@@ -106,10 +125,10 @@ class MultiSiteMonitor:
                     result="success",
                     error=None,
                 )
-                events.append(MonitorEvent(runtime.site.id, MonitorEventKind.EXIT, now))
+                events.append(self._event(runtime.site.id, MonitorEventKind.EXIT, now))
             elif schedule_event.kind is ScheduleEventKind.INVALID:
                 events.append(
-                    MonitorEvent(
+                    self._event(
                         runtime.site.id,
                         MonitorEventKind.ERROR,
                         now,
@@ -134,7 +153,7 @@ class MultiSiteMonitor:
                 *self._logged_events(
                     runtime,
                     now,
-                    MonitorEvent(
+                    self._event(
                         runtime.site.id,
                         MonitorEventKind.ERROR,
                         now,
@@ -182,7 +201,7 @@ class MultiSiteMonitor:
                                 *self._logged_events(
                                     runtime,
                                     now,
-                                    MonitorEvent(
+                                    self._event(
                                         runtime.site.id,
                                         MonitorEventKind.ERROR,
                                         now,
@@ -207,7 +226,7 @@ class MultiSiteMonitor:
                                 *self._logged_events(
                                     runtime,
                                     now,
-                                    MonitorEvent(
+                                    self._event(
                                         runtime.site.id,
                                         MonitorEventKind.ERROR,
                                         now,
@@ -230,7 +249,7 @@ class MultiSiteMonitor:
                         *self._logged_events(
                             runtime,
                             now,
-                            MonitorEvent(runtime.site.id, MonitorEventKind.LOGIN, now),
+                            self._event(runtime.site.id, MonitorEventKind.LOGIN, now),
                             action="login",
                             result="success",
                         ),
@@ -261,7 +280,7 @@ class MultiSiteMonitor:
             *self._logged_events(
                 runtime,
                 now,
-                MonitorEvent(
+                self._event(
                     runtime.site.id,
                     MonitorEventKind.ERROR,
                     now,
@@ -286,7 +305,7 @@ class MultiSiteMonitor:
                     *self._logged_events(
                         runtime,
                         now,
-                        MonitorEvent(runtime.site.id, MonitorEventKind.EXIT, now),
+                        self._event(runtime.site.id, MonitorEventKind.EXIT, now),
                         action="exit",
                         result="success",
                     )
@@ -325,7 +344,7 @@ class MultiSiteMonitor:
                                 *self._logged_events(
                                     runtime,
                                     now,
-                                    MonitorEvent(
+                                    self._event(
                                         runtime.site.id,
                                         MonitorEventKind.ERROR,
                                         now,
@@ -361,7 +380,7 @@ class MultiSiteMonitor:
                                 *self._logged_events(
                                     runtime,
                                     now,
-                                    MonitorEvent(
+                                    self._event(
                                         runtime.site.id,
                                         MonitorEventKind.ERROR,
                                         now,
@@ -392,7 +411,7 @@ class MultiSiteMonitor:
                     *self._logged_events(
                         runtime,
                         now,
-                        MonitorEvent(runtime.site.id, MonitorEventKind.RELOAD, now),
+                        self._event(runtime.site.id, MonitorEventKind.RELOAD, now),
                         action="reload",
                         result="success",
                     ),
@@ -401,7 +420,7 @@ class MultiSiteMonitor:
                 if attempt == runtime.site.max_retries:
                     self._close(runtime)
                     runtime.active = False
-                    event = MonitorEvent(
+                    event = self._event(
                         runtime.site.id,
                         MonitorEventKind.ERROR,
                         now,
@@ -481,7 +500,7 @@ class MultiSiteMonitor:
                 return []
             self._logger_diagnostics.add(runtime.site.id)
             return [
-                MonitorEvent(
+                self._event(
                     runtime.site.id,
                     MonitorEventKind.ERROR,
                     now,
@@ -518,7 +537,7 @@ class MultiSiteMonitor:
         self._logger_failures.add(runtime.site.id)
         self._logger_diagnostics.add(runtime.site.id)
         return [
-            MonitorEvent(
+            self._event(
                 runtime.site.id,
                 MonitorEventKind.ERROR,
                 now,
@@ -533,6 +552,17 @@ class MultiSiteMonitor:
             with suppress(Exception):
                 runtime.session.close()
             runtime.session = None
+
+    def _event(
+        self,
+        site_id: str,
+        kind: MonitorEventKind,
+        at: datetime,
+        message: str = "",
+        phase: str | None = None,
+        category: str | None = None,
+    ) -> MonitorEvent:
+        return MonitorEvent(site_id, kind, at, message, phase, category, self.run_id)
 
     def _safe_retry_backoff(self, attempt: int) -> float:
         """Return a finite, non-negative delay even for an injected policy."""
@@ -559,6 +589,33 @@ class MultiSiteMonitor:
             events = self.tick(clock(), monotonic=monotonic())
             if events and on_events is not None:
                 on_events(events)
+            wait(1.0)
+
+    def run_window(
+        self,
+        site_id: str,
+        *,
+        clock: Callable[[], datetime],
+        monotonic: Callable[[], float],
+        wait: Callable[[float], None] = sleep,
+        should_stop: Callable[[], bool] | None = None,
+        on_events: Callable[[tuple[MonitorEvent, ...]], None] | None = None,
+    ) -> None:
+        """Run the selected site once, without entering a second window."""
+        stop = should_stop or (lambda: False)
+        started = False
+        while not stop():
+            now = clock()
+            phase = self._scheduler.phase(site_id, now)
+            if phase is WindowPhase.AFTER and not started:
+                return
+            events = self.tick(now, monotonic=monotonic())
+            if any(e.site_id == site_id and e.kind is MonitorEventKind.LOGIN for e in events):
+                started = True
+            if events and on_events is not None:
+                on_events(events)
+            if started and phase is WindowPhase.AFTER:
+                return
             wait(1.0)
 
     def close(self) -> None:

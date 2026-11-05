@@ -17,6 +17,13 @@ sitio, salvo ese tramo posterior a medianoche, que conserva el día de inicio.
 `on_events` y `should_stop` como dependencias opcionales inyectables, por lo
 que las pruebas no dependen del reloj real ni esperan en tiempo real.
 
+El modo `adams-monitor --site <id> --once-window` crea un worker de un solo
+sitio. Espera antes del inicio, conecta dentro de la ventana y termina al
+alcanzar `EXIT`; si comienza después del límite no realiza login ni inicia una
+segunda ventana. `SIGINT` y `SIGTERM` solicitan el mismo cierre cooperativo.
+La opción `--once-window` requiere `--site`; si se omite, la CLI devuelve el
+código de configuración `2` antes de crear el monitor.
+
 ## Monitorización multi-sitio
 
 `adams_tutoria.monitoring.MultiSiteMonitor` conecta esos eventos con el

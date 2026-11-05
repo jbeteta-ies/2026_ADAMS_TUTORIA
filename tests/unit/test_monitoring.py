@@ -117,6 +117,25 @@ def test_login_reload_exit_and_site_isolation(monkeypatch) -> None:
     assert first.closed and second.closed
 
 
+def test_login_reload_exit_and_error_events_share_opaque_run_id(monkeypatch) -> None:
+    session = Session(fail_reload=True)
+    monkeypatch.setattr("adams_tutoria.monitoring.adapter_for_site", lambda _: Adapter(session))
+    monitor = MultiSiteMonitor(
+        [site("one", "https://example.invalid/one", max_retries=0)],
+        browser_factory=lambda: object(),
+    )
+    run_id = monitor.run_identifier
+
+    login_events = monitor.tick(datetime(2026, 1, 5, 9, 0, tzinfo=UTC), monotonic=0)
+    error_events = monitor.tick(datetime(2026, 1, 5, 9, 0, 10, tzinfo=UTC), monotonic=10)
+    exit_events = monitor.tick(datetime(2026, 1, 5, 10, 0, tzinfo=UTC), monotonic=11)
+
+    assert login_events[0].kind is MonitorEventKind.LOGIN
+    assert login_events[0].run_id == run_id
+    assert any(event.kind is MonitorEventKind.ERROR for event in error_events)
+    assert all(event.run_id == run_id for event in (*login_events, *error_events, *exit_events))
+
+
 def test_multisite_monitor_emits_navigation_success_after_login_and_reload(
     monkeypatch, tmp_path
 ) -> None:
@@ -209,6 +228,26 @@ def test_close_is_idempotent(monkeypatch) -> None:
     monitor.close()
     monitor.close()
     assert session.closed
+
+
+def test_workers_receive_independent_opaque_run_ids(tmp_path) -> None:
+    def configured(site_id: str) -> SiteConfig:
+        return SiteConfig(
+            site_id,
+            "SYNTHETIC",
+            "https://example.invalid/login",
+            "https://example.invalid/target",
+            "synthetic-user",
+            "synthetic-password",
+            log_file=tmp_path / f"{site_id}.log",
+        )
+
+    first = MultiSiteMonitor([configured("one")], browser_factory=lambda: object())
+    second = MultiSiteMonitor([configured("two")], browser_factory=lambda: object())
+
+    assert first.run_identifier != second.run_identifier
+    assert len(first.run_identifier) == 36
+    assert len(second.run_identifier) == 36
 
 
 def test_one_shot_site_iterable_is_used_by_scheduler_and_runtimes(monkeypatch) -> None:
@@ -636,9 +675,10 @@ def test_login_and_reload_are_written_to_independent_safe_logs(tmp_path, monkeyp
         records = [json.loads(line) for line in item.log_file.read_text().splitlines()]
         assert [record["action"] for record in records] == ["startup", "login", "reload"]
         assert all(
-            set(record) == {"timestamp", "site_id", "provider", "action", "result"}
+            set(record) == {"timestamp", "site_id", "provider", "action", "result", "run_id"}
             for record in records
         )
+        assert len({record["run_id"] for record in records}) == 1
         text = item.log_file.read_text()
         assert "synthetic-password-with-token-like-text" not in text
         assert "cookie" not in text.lower()
