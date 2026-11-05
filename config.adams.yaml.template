@@ -8,9 +8,11 @@ sites:
     login_url: https://www.formacion.cc/index.php?c=adamsvalencia
     username: "${ADAMS_USERNAME}"
     password: "${ADAMS_PASSWORD}"
+    start_date: "2026-11-05"
+    end_date: "2026-11-D5"
     weekdays: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY]
-    start_time: "16:20"
-    end_time: "20:40"
+    start_time: "11:59"
+    end_time: "12:05"
     timezone: Europe/Madrid
     interval_seconds: 60
     timeout_seconds: 30
