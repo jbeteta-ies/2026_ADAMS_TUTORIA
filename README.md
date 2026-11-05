@@ -111,6 +111,21 @@ continuous monitor with:
 uv run adams-monitor
 ```
 
+Para un worker independiente, selecciona el sitio y limita la ejecución a una
+sola ventana:
+
+```bash
+uv run adams-monitor --config config.yaml --site synthetic-site --once-window
+```
+
+`--once-window` requiere siempre `--site`; usarlo sin sitio devuelve el error
+de configuración `2` antes de iniciar la monitorización.
+
+`--site` inexistente, un YAML ausente o inválido devuelve `2` sin mostrar
+secretos; un fallo de ejecución devuelve `1`; una terminación normal o por
+`SIGINT`/`SIGTERM` devuelve `0`. El worker espera antes de la ventana, respeta
+ventanas nocturnas y no inicia una segunda ventana.
+
 The command validates configuration before starting Playwright and coordinates
 the scheduler, monitor, provider adapters, and independent site logs. SIGINT,
 SIGTERM, and Ctrl-C request a cooperative clean shutdown. Exit status 2 means
