@@ -1,0 +1,90 @@
+name: Monitor Mantia 1
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: mantia1
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 155
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.9.7"
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install project dependencies
+        run: uv sync --locked --dev
+
+      - name: Generate and validate effective Mantia configuration
+        env:
+          MANTIA_USERNAME: ${{ secrets.MANTIA_USERNAME }}
+          MANTIA_PASSWORD: ${{ secrets.MANTIA_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$MANTIA_USERNAME" || { printf '%s\n' 'Missing required secret: MANTIA_USERNAME' >&2; exit 1; }
+          test -n "$MANTIA_PASSWORD" || { printf '%s\n' 'Missing required secret: MANTIA_PASSWORD' >&2; exit 1; }
+          uv run python - <<'PY'
+          import os
+          from pathlib import Path
+          import yaml
+
+          template = Path("config.mantia.yaml.template")
+          output = Path(os.environ["RUNNER_TEMP"]) / "mantia1-config.yaml"
+          data = yaml.safe_load(template.read_text(encoding="utf-8"))
+          sites = data.get("sites", [])
+          if len(sites) != 1:
+              raise SystemExit("Mantia template must contain exactly one site")
+          site = sites[0]
+          site.update(
+              id="mantia1",
+              username=os.environ["MANTIA_USERNAME"],
+              password=os.environ["MANTIA_PASSWORD"],
+              start_date="2026-11-06",
+              end_date="2026-11-18",
+              start_time="14:30",
+              end_time="16:30",
+              interval_seconds=60,
+              log_file="data/local/logs/mantia1.log",
+          )
+          output.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+          output.chmod(0o600)
+
+          from adams_tutoria.config import load_sites_config
+          configuration = load_sites_config(output)
+          if tuple(site.id for site in configuration.sites) != ("mantia1",):
+              raise SystemExit("effective configuration must contain only mantia1")
+          print("Effective Mantia configuration validated without displaying secrets.")
+          PY
+
+      - name: Install Chromium and Playwright dependencies
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run Mantia 1 worker
+        run: uv run --locked adams-monitor --config "$RUNNER_TEMP/mantia1-config.yaml" --site mantia1 --once-window
+
+      - name: Upload Mantia 1 diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mantia1-monitor-logs-${{ github.run_id }}
+          path: data/local/logs/mantia1.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Remove effective configuration and logs
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/mantia1-config.yaml" data/local/logs
