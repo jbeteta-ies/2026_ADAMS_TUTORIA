@@ -48,3 +48,29 @@ sites:
             text_marker: "Contenido disponible"
 
 # Do not include cookies, tokens, secrets, or personal data in this template.
+
+# Mantia/Moodle example (read-only GET navigation; use local credentials only):
+#   provider: MANTIA
+#   login_url: https://betaformacion.mantia.es/login/index.php
+#   navigation:
+#     version: "1.0"
+#     allowed_origin: https://betaformacion.mantia.es
+#     steps:
+#       - order: 1
+#         method: GET
+#         url: https://betaformacion.mantia.es/my/
+#         expected_result: {status_code: 200, url_path: /my/}
+#       - order: 2
+#         method: GET
+#         url: https://betaformacion.mantia.es/course/view.php?id=56
+#         expected_result: {status_code: 200, url_path: /course/view.php}
+#       - order: 3
+#         method: GET
+#         url: https://betaformacion.mantia.es/mod/forum/view.php?id=3834
+#         expected_result: {status_code: 200, url_path: /mod/forum/view.php}
+#       - order: 4
+#         method: GET
+#         url: https://betaformacion.mantia.es/mod/scorm/view.php?id=3838
+#         expected_result: {status_code: 200, url_path: /mod/scorm/view.php}
+# The Moodle logintoken is extracted from the login form at runtime; it is not
+# a configuration value. Never put real credentials in this tracked template.
