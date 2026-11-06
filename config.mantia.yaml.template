@@ -9,6 +9,8 @@ sites:
     login_url: https://betaformacion.mantia.es/login/index.php
     username: "${MANTIA_USERNAME}"
     password: "${MANTIA_PASSWORD}"
+    start_date: "2026-11-6"
+    end_date: "2026-11-18"
     start_time: "14:30"
     end_time: "16:30"
     timezone: Europe/Madrid

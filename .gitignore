@@ -92,6 +92,7 @@ data/processed/
 .env.*
 !.env.example
 config.yaml
+config.mantia.local.yaml
 
 # Flask stuff:
 instance/
