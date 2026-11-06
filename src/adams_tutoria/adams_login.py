@@ -66,7 +66,7 @@ class LoginSession:
 
 
 def perform_login_session(
-    settings: AdamsLoginSettings, *, browser_api: Any
+    settings: AdamsLoginSettings, *, browser_api: Any, logintoken_field: str | None = None
 ) -> tuple[LoginResult, LoginSession | None]:
     """Attempt login and return an ephemeral session for the caller to close."""
     _validate_url(settings.login_url)
@@ -90,6 +90,17 @@ def perform_login_session(
         password = _first_visible(
             page, ("input[name='clave']", "input[name='password']", "input[type='password']")
         )
+        if logintoken_field is not None:
+            logintoken = _first_value(page, logintoken_field)
+            if logintoken is None:
+                session.close()
+                return (
+                    LoginResult("failed", "No se pudo obtener el token dinámico de login."),
+                    None,
+                )
+            # The token is already present in the form and is submitted with the
+            # browser POST.  Reading it validates that this login attempt has a
+            # runtime token without trying to fill a hidden Moodle input.
         submit = _first_visible(
             page,
             (
@@ -215,6 +226,18 @@ def _first_visible(page: Any, selectors: tuple[str, ...]) -> Any | None:
         if locator.is_visible():
             return locator
     return None
+
+
+def _first_value(page: Any, field_name: str) -> str | None:
+    """Read one transient hidden form value without exposing it to callers."""
+    try:
+        locator = page.locator(f"input[name='{field_name}']").first
+        if locator.count() == 0:
+            return None
+        value = locator.input_value()
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return value if isinstance(value, str) and value else None
 
 
 def _is_blocked(page: Any) -> bool:

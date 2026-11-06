@@ -100,6 +100,48 @@ class AdamsLoginAdapter:
         return _outcome(result), session
 
 
+class MantiaLoginAdapter:
+    """Moodle adapter with a per-attempt, runtime-extracted logintoken."""
+
+    def login(self, request: LoginRequest, *, browser_api: Any | None = None) -> LoginOutcome:
+        if browser_api is None:
+            return LoginOutcome(LoginStatus.FAILED, "No se pudo completar el login Moodle.")
+        settings = AdamsLoginSettings(
+            request.username,
+            request.password,
+            request.login_url,
+            request.target_url,
+            timeout_seconds=request.timeout_seconds,
+        )
+        try:
+            result, session = perform_login_session(
+                settings, browser_api=browser_api, logintoken_field="logintoken"
+            )
+            if session is not None:
+                session.close()
+        except Exception:
+            return LoginOutcome(LoginStatus.FAILED, "No se pudo completar el login Moodle.")
+        return _outcome(result)
+
+    def login_session(
+        self, request: LoginRequest, *, browser_api: Any
+    ) -> tuple[LoginOutcome, LoginSession | None]:
+        settings = AdamsLoginSettings(
+            request.username,
+            request.password,
+            request.login_url,
+            request.target_url,
+            timeout_seconds=request.timeout_seconds,
+        )
+        try:
+            result, session = perform_login_session(
+                settings, browser_api=browser_api, logintoken_field="logintoken"
+            )
+        except Exception:
+            return LoginOutcome(LoginStatus.FAILED, "No se pudo completar el login Moodle."), None
+        return _outcome(result), session
+
+
 class UnimplementedLoginAdapter:
     """Reserved provider entry point; no login flow is attempted."""
 
@@ -146,6 +188,7 @@ def request_from_site(site: SiteConfig) -> LoginRequest:
 
 _FACTORIES: Mapping[str, Callable[[], LoginAdapter]] = {
     "ADAMS": AdamsLoginAdapter,
+    "MANTIA": MantiaLoginAdapter,
     "BETA": UnimplementedLoginAdapter,
 }
 
