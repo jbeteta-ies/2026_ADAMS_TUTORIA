@@ -104,6 +104,26 @@ HTTP(S) URLs without embedded credentials. Unknown fields, unsafe log paths,
 duplicate IDs, invalid dates/times, and invalid timezones are rejected without
 including password values in errors.
 
+For a local Mantia/Moodle check, create the ignored configuration locally:
+
+```bash
+cp config.mantia.yaml.template config.yaml
+```
+
+The YAML loader does not expand environment variables. Therefore, replace
+`${MANTIA_USERNAME}` and `${MANTIA_PASSWORD}` directly in the ignored
+`config.yaml` with the local values before running the monitor; merely exporting
+shell variables is not sufficient. Never add that generated file to Git. The
+template contains one site (`mantia1`) and four read-only GET checks. For the
+future second window, make another ignored copy named `mantia2` and change its
+window to `20:30`–`22:30`; the two intended windows are `mantia1`
+(`14:30`–`16:30`) and `mantia2` (`20:30`–`22:30`). The template intentionally
+does not schedule either window or provide automation. Its supported
+status-code and URL-path checks detect login redirects without inventing
+content markers, and no SCORM activity is started. Run a one-window local check with
+`uv run adams-monitor --config config.yaml --site mantia1 --once-window` only
+after confirming the local credentials and authorized test environment.
+
 After copying `config.example.yaml` to the ignored local `config.yaml`, run the
 continuous monitor with:
 
