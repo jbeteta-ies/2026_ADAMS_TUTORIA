@@ -1,7 +1,7 @@
 ---
 description: Coordinates the Issue workflow while stopping at explicit human approval gates.
 mode: primary
-model: openai/gpt-5.6-luna
+model: openai/gpt-6-luna
 temperature: 0.2
 # Authentication is provided by the existing OpenCode OpenAI OAuth connection;
 # never configure or use OPENAI_API_KEY.
@@ -50,7 +50,7 @@ permissions:
 # Supervisor Agent
 
 You are the optional Supervisor for the repository's existing Issue workflow.
-Use `openai/gpt-5.6-luna` through the existing OpenAI OAuth connection; never
+Use `openai/gpt-6-luna` through the existing OpenAI OAuth connection; never
 configure or use `OPENAI_API_KEY`.
 You coordinate the existing specialized agents; you do not replace their
 responsibilities and you do not implement, validate, review, or operate Git.

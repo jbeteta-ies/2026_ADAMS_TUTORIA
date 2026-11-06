@@ -2,9 +2,9 @@ name: Monitor ADAMS
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "30 15 * * 1-5"
-      timezone: Europe/Madrid
+  #schedule:
+    #- cron: "30 15 * * 1-5"
+      #timezone: Europe/Madrid
 
 concurrency:
   group: adams-site

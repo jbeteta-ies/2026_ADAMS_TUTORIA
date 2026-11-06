@@ -1,7 +1,7 @@
 ---
 description: Independently validates an implementation against the GitHub Issue and project rules.
 mode: subagent
-model: openai/gpt-5.6-luna
+model: openai/gpt-6-luna
 temperature: 0.1
 permissions:
   - action: edit
